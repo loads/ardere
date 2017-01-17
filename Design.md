@@ -27,23 +27,27 @@ Due to the heavy concurrency nature of making AWS calls, Node is used to make as
 
 ## SetupTestPlan Lambda, runs as first step of test run state machine
 1. Load given S3/PlanUUID JSON/YAML file describing test plan
-2. Create S3/PlanUUID/RunUUID/ dir
-3. Create necessary ECS Service JSON files, send off ecs:create_service calls
+2. Parse test plan steps for steps that result in DNS names.
+3. Create CloudFormation template based on test plan, with ELB's for DNS names.
+4. Start CloudFormation stack, get stack name/id.
+5. Create S3/PlanUUID/RunUUID/ dir
+6. Create necessary ECS Service JSON files, send off ecs:create_service calls
   * Wrap container commands with Waiter and appropriate wait time
-4. Save S3/PlanUUID/RunUUID/services.json file with hash of:
-  * Container count needed
-  * Array of hashes of:
-    * ECS Service ARN
-    * Duration in seconds the ECS Service should run
-5. Done
+7. Save S3/PlanUUID/RunUUID/services.json file with hash of:
+  * CloudFormation stack name.
+  * Container count needed for each service name.
+8. Done
 
 ## AllRunning Lambda, running once per min via CloudWatch Scheduled Event
 1. Load S3/AllRunningTaskList, list of current Task ID’s being monitored
 2. Call GetTask with short time-out until timeout occurs to get any new tasks to watch
 3. Iterate through task list…
-  * Load S3/PlanUUID/RunUUID/services.json to get count of container instances that must be running
+  * Load S3/PlanUUID/RunUUID/services.json to find CF instance name.
+  * Call CF DescribeStacks to pull stack information and steps that have completed.
+  * If stack creation has failed, call Fail and stop.
+  * If stack is complete, save out ECS service identifiers, and proceed to ECS Service verification.
   * Call ECS DescribeServices with service lists, determine if all deployments for all services have PendingCount 0 or not
-  * Signal with Success/Fail if all files are there, or HeartBeat if not
+  * Signal with Success/Fail if all files are there, or HeartBeat if not.
 4. Save new TaskList back out, subtracting tasks that had Success/Fail called
 5. Done
 
