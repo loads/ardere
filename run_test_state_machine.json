@@ -1,0 +1,106 @@
+{
+  "Comment": "Load and run a test-plan.",
+  "StartAt": "Parse Test Plan",
+  "Version": "1.0",
+  "States": {
+    "Parse Test Plan": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "Next": "Start CloudFormation Stack"
+    },
+    "Start CloudFormation Stack": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "Next": "Check CloudFormation Running"
+    },
+    "Check CloudFormation Running": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "Next": "Check ECS Services Running",
+      "Retry": [
+        {
+          "ErrorEquals": [ "NotReady" ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 40
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [ "States.ALL" ],
+          "Next": "Stop CloudFormation Stack"
+        }
+      ]
+    },
+    "Check ECS Services Running": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "Next": "Trigger ECS Services",
+      "Retry": [
+        {
+          "ErrorEquals": [ "NotReady" ],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 120
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [ "States.ALL" ],
+          "Next": "Stop ECS Services"
+        }
+      ]
+    },
+    "Trigger ECS Services": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "Next": "Monitor Plan Run",
+      "Catch": [
+        {
+          "ErrorEquals": [ "States.ALL" ],
+          "Next": "Stop CloudFormation Stack"
+        }
+      ]
+    },
+    "Monitor Plan Run": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "Next": "Check Plan Done",
+      "Catch": [
+        {
+          "ErrorEquals": [ "States.ALL" ],
+          "Next": "Stop ECS Services"
+        }
+      ]
+    },
+    "Check Plan Done": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.services_remain",
+          "BooleanEquals": true,
+          "Next": "Pause ECS Polling"
+        }
+      ],
+      "Default": "Stop ECS Services"
+    },
+    "Pause ECS Polling": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "Monitor Plan Run"
+    },
+    "Stop ECS Services": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "Next": "Stop CloudFormation Stack"
+    },
+    "Stop CloudFormation Stack": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "Next": "Check CloudFormation Done"
+    },
+    "Check CloudFormation Done": {
+      "Type": "Task",
+      "Resource": "arn:aws:swf:us-east-1:123456789012:task:HelloWorld",
+      "End": true
+    }
+  }
+}
