@@ -1,0 +1,548 @@
+{
+  "Description": "AutoScale EC2 creation template",
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Metadata": {
+    "Comment": {
+      "Fn::Join": [
+        "\n",
+        [
+          "This template starts up a selected number of (small) instances that just run",
+          "a 'Hello world' sort of script.",
+          "Eventually this would call a bunch of CF Template snippets that would populate",
+          "the various load systems.",
+          "There are two systems, 'Parma*' which contains the system to test, and 'Telum*'",
+          "which contains the testing system. (parma is latin for shield, telum is latin for",
+          "arrow).",
+          "TODO: ",
+          "* expand parameter maps to include all allowed EC2 types",
+          "* add telum hosts",
+          "* use docker container references"
+        ]
+      ]
+    }
+  },
+  "Parameters": {
+    "ParmaInstanceType": {
+      "Type": "String",
+      "Description": "Type of EC2 instance to run the targeted system on",
+      "Default": "t1.micro",
+      "AllowedValues": [
+        "t1.micro",
+        "t2.nano",
+        "t2.micro",
+        "t2.small"
+      ],
+      "ConstraintDescription": "Must be a valid EC2 instance. "
+    },
+    "ParmaInstanceCount": {
+      "Type": "Number",
+      "Description": "Number of instances for the targeted system",
+      "Default": 1,
+      "MaxValue": 10
+    },
+    "KeyPair": {
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Description": "EC2 Key Pair for system access"
+    }
+  },
+  "Mappings": {
+    "AWSInstanceType2Arch": {
+      "t1.micro": {
+        "Arch": "PV64"
+      },
+      "t2.nano": {
+        "Arch": "HVM64"
+      },
+      "t2.micro": {
+        "Arch": "HVM64"
+      },
+      "t2.small": {
+        "Arch": "HVM64"
+      },
+      "t2.medium": {
+        "Arch": "HVM64"
+      },
+      "t2.large": {
+        "Arch": "HVM64"
+      },
+      "m1.small": {
+        "Arch": "PV64"
+      },
+      "m1.medium": {
+        "Arch": "PV64"
+      },
+      "m1.large": {
+        "Arch": "PV64"
+      },
+      "m1.xlarge": {
+        "Arch": "PV64"
+      },
+      "m2.xlarge": {
+        "Arch": "PV64"
+      },
+      "m2.2xlarge": {
+        "Arch": "PV64"
+      },
+      "m2.4xlarge": {
+        "Arch": "PV64"
+      },
+      "m3.medium": {
+        "Arch": "HVM64"
+      },
+      "m3.large": {
+        "Arch": "HVM64"
+      },
+      "m3.xlarge": {
+        "Arch": "HVM64"
+      },
+      "m3.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "m4.large": {
+        "Arch": "HVM64"
+      },
+      "m4.xlarge": {
+        "Arch": "HVM64"
+      },
+      "m4.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "m4.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "m4.10xlarge": {
+        "Arch": "HVM64"
+      },
+      "c1.medium": {
+        "Arch": "PV64"
+      },
+      "c1.xlarge": {
+        "Arch": "PV64"
+      },
+      "c3.large": {
+        "Arch": "HVM64"
+      },
+      "c3.xlarge": {
+        "Arch": "HVM64"
+      },
+      "c3.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "c3.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "c3.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "c4.large": {
+        "Arch": "HVM64"
+      },
+      "c4.xlarge": {
+        "Arch": "HVM64"
+      },
+      "c4.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "c4.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "c4.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "g2.2xlarge": {
+        "Arch": "HVMG2"
+      },
+      "g2.8xlarge": {
+        "Arch": "HVMG2"
+      },
+      "r3.large": {
+        "Arch": "HVM64"
+      },
+      "r3.xlarge": {
+        "Arch": "HVM64"
+      },
+      "r3.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "r3.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "r3.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "i2.xlarge": {
+        "Arch": "HVM64"
+      },
+      "i2.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "i2.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "i2.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "d2.xlarge": {
+        "Arch": "HVM64"
+      },
+      "d2.2xlarge": {
+        "Arch": "HVM64"
+      },
+      "d2.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "d2.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "hi1.4xlarge": {
+        "Arch": "HVM64"
+      },
+      "hs1.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "cr1.8xlarge": {
+        "Arch": "HVM64"
+      },
+      "cc2.8xlarge": {
+        "Arch": "HVM64"
+      }
+    },
+    "AWSRegionArch2AMI": {
+      "us-east-1": {
+        "PV64": "ami-2a69aa47",
+        "HVM64": "ami-6869aa05",
+        "HVMG2": "ami-648d9973"
+      },
+      "us-west-2": {
+        "PV64": "ami-7f77b31f",
+        "HVM64": "ami-7172b611",
+        "HVMG2": "ami-09cd7a69"
+      },
+      "us-west-1": {
+        "PV64": "ami-a2490dc2",
+        "HVM64": "ami-31490d51",
+        "HVMG2": "ami-1e5f0e7e"
+      },
+      "us-east-2": {
+        "PV64": "NOT_SUPPORTED",
+        "HVM64": "ami-f6035893",
+        "HVMG2": "NOT_SUPPORTED"
+      }
+    }
+  },
+  "Conditions": {},
+  "Resources": {
+    "ParmaWebServerGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "DependsOn": "ParmaLaunchConfig",
+      "Metadata": {
+        "Comment": {
+          "Fn::Join": ["\n", [
+            "The ParmaLaunchConfig fn-init script will post an event to this",
+            "resource once it has initialized. You really want to make sure",
+            "that the name matches, else the build will fail."
+            ]]
+        }
+      },
+      "CreationPolicy": {
+        "ResourceSignal": {
+          "Count": 1,
+          "Timeout": "PT15M"
+        }
+      },
+      "Properties": {
+        "AvailabilityZones": {
+          "Fn::GetAZs": ""
+        },
+        "LaunchConfigurationName": {
+          "Ref": "ParmaLaunchConfig"
+        },
+        "MaxSize": {
+          "Ref": "ParmaInstanceCount"
+        },
+        "MinSize": "1",
+        "LoadBalancerNames": [
+          {
+            "Ref": "ParmaELB"
+          }
+        ]
+      }
+    },
+    "ParmaLaunchConfig": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Metadata": {
+        "Comment": "Simple App",
+        "AWS::CloudFormation::Init": {
+          "Metadata": {
+            "Comment": {
+              "Fn::Join": [
+                " ",
+                [
+                  "TODO: Replace the following with pointers to the appropriate container inits.",
+                  "Should probably leave the cfn-* bits alone."
+                ]
+              ]
+            }
+          },
+          "config": {
+            "packages": {
+              "yum": {
+                "httpd": []
+              }
+            },
+            "files": {
+              "/var/www/html/index.html": {
+                "content": {
+                  "Fn::Join": [
+                    "\n",
+                    [
+                      "<h1>Ok.</h1>",
+                      "stack = ",
+                      {
+                        "Ref": "AWS::StackName"
+                      },
+                      " ",
+                      {
+                        "Ref": "AWS::StackId"
+                      }
+                    ]
+                  ]
+                },
+                "mode": "000644",
+                "owner": "root",
+                "group": "root"
+              },
+              "/var/www/html/index.html": {
+                "content": {
+                  "Fn::Join": [
+                    "\n",
+                    [
+                      "<h1>Ok.</h1>",
+                      "stack = ",
+                      {
+                        "Ref": "AWS::StackName"
+                      },
+                      " ",
+                      {
+                        "Ref": "AWS::StackId"
+                      }
+                    ]
+                  ]
+                },
+                "mode": "000644",
+                "owner": "root",
+                "group": "root"
+              },
+              "/var/www/html/status/index.html": {
+                "content": "ok",
+                "mode": "000644",
+                "owner": "root",
+                "group": "root"
+              },
+              "/etc/cfn/cfn-hup.conf": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "[main]\n",
+                      "stack=",
+                      {
+                        "Ref": "AWS::StackId"
+                      },
+                      "\n",
+                      "region=",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "\n"
+                    ]
+                  ]
+                },
+                "mode": "000400",
+                "owner": "root",
+                "group": "root"
+              },
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "[cfn-auto-reloader-hook]\n",
+                      "triggers=post.update\n",
+                      "path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init\n",
+                      "action=/opt/aws/bin/cfn-init -v ",
+                      "         --stack ",
+                      {
+                        "Ref": "AWS::StackName"
+                      },
+                      "         --resource LaunchConfig ",
+                      "         --region ",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "\n",
+                      "runas=root\n"
+                    ]
+                  ]
+                }
+              }
+            },
+            "services": {
+              "sysvinit": {
+                "httpd": {
+                  "enabled": "true",
+                  "ensureRunning": "true"
+                },
+                "cfn-hup": {
+                  "enabled": "true",
+                  "ensureRunning": "true",
+                  "files": [
+                    "/etc/cfn/cfn-hup.conf",
+                    "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "KeyName": {
+          "Ref": "KeyPair"
+        },
+        "ImageId": {
+          "Fn::FindInMap": [
+            "AWSRegionArch2AMI",
+            {
+              "Ref": "AWS::Region"
+            },
+            {
+              "Fn::FindInMap": [
+                "AWSInstanceType2Arch",
+                {
+                  "Ref": "ParmaInstanceType"
+                },
+                "Arch"
+              ]
+            }
+          ]
+        },
+        "SecurityGroups": [
+          {
+            "Ref": "ParmaInstanceSecurityGroup"
+          }
+        ],
+        "InstanceType": {
+          "Ref": "ParmaInstanceType"
+        },
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash -xe\n",
+                "yum update -y aws-cfn-bootstrap\n",
+                "# Get the launch config for this set.\n",
+                "/opt/aws/bin/cfn-init -v ",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                "         --resource ParmaLaunchConfig ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n",
+                "# Tell the server group that it's ok to continue.\n",
+                "/opt/aws/bin/cfn-signal -e $? ",
+                "         --stack ",
+                {
+                  "Ref": "AWS::StackName"
+                },
+                "         --resource ParmaWebServerGroup ",
+                "         --region ",
+                {
+                  "Ref": "AWS::Region"
+                },
+                "\n"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "ParmaInstanceSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Enable SSH & HTTP access",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "22",
+            "ToPort": "22",
+            "CidrIp": "0.0.0.0/0"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "80",
+            "ToPort": "80",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ]
+      }
+    },
+    "ParmaELB": {
+      "Type": "AWS::ElasticLoadBalancing::LoadBalancer",
+      "Properties": {
+        "AvailabilityZones": {
+          "Fn::GetAZs": ""
+        },
+        "CrossZone": "true",
+        "Listeners": [
+          {
+            "LoadBalancerPort": "80",
+            "InstancePort": "80",
+            "Protocol": "HTTP"
+          }
+        ],
+        "HealthCheck": {
+          "Target": "http:80/status/",
+          "HealthyThreshold": "3",
+          "UnhealthyThreshold": "5",
+          "Interval": "30",
+          "Timeout": "5"
+        },
+        "ConnectionDrainingPolicy": {
+          "Enabled": "true",
+          "Timeout": "300"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "URL": {
+      "Description": "URL of the website",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "http://",
+            {
+              "Fn::GetAtt": [
+                "ParmaELB",
+                "DNSName"
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    "arn": {
+      "Description": "ARN",
+      "Value": {
+        "Ref": "AWS::StackId"
+      }
+    }
+  }
+}
