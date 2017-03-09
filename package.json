@@ -1,0 +1,25 @@
+{
+  "name": "ardere",
+  "version": "1.0.0",
+  "description": "Serverless Service for Load-Testing",
+  "main": "index.js",
+  "dependencies": {
+    "serverless": "^1.8.0",
+    "serverless-python-requirements": "^2.0.0-beta.7",
+    "serverless-step-functions": "^0.4.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/loads/ardere.git"
+  },
+  "author": "",
+  "license": "MPL-2.0",
+  "bugs": {
+    "url": "https://github.com/loads/ardere/issues"
+  },
+  "homepage": "https://github.com/loads/ardere#readme"
+}
