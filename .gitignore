@@ -1,5 +1,11 @@
 # Distribution / packaging
+.coverage
+.floo
+.idea
 .Python
+.requirements
+.npmignore
+ardenv/
 env/
 build/
 develop-eggs/
@@ -14,6 +20,7 @@ sdist/
 var/
 *.egg-info/
 .installed.cfg
+*.pyc
 *.egg
 node_modules/
 

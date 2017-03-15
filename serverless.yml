@@ -8,6 +8,7 @@ package:
   exclude:
     - node_modules/**
     - ardenv/**
+    - tests/**
   include:
     - ardere/**
 
