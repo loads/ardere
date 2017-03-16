@@ -142,6 +142,12 @@ class ECSManager(object):
             "additional_command_args"]
         shell_command3 = ['sh', '-c', '{}'.format(shell_command2)]
 
+        # Prep the env vars
+        env_vars = [{"name": "WAITFORCLUSTER", "value": shell_script}]
+        for env_var in step.get("environment_data", []):
+            name, value = env_var.split("=", 1)
+            env_vars.append({"name": name, "value": value})
+
         # ECS wants a family name for task definitions, no spaces, 255 chars
         family_name = step["name"] + "-" + self._plan_uuid
         task_response = self._ecs_client.register_task_definition(
@@ -153,12 +159,7 @@ class ECSManager(object):
                     "cpu": step["cpu_units"],
                     # using only memoryReservation sets no hard limit
                     "memoryReservation": 256,
-                    "environment": [
-                        {
-                            "name": "WAITFORCLUSTER",
-                            "value": shell_script
-                        }
-                    ],
+                    "environment": env_vars,
                     "entryPoint": shell_command3
                 }
             ],

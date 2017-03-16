@@ -10,6 +10,9 @@ sample_basic_test_plan = """
       "instance_type": "t2.medium",
       "run_max_time": 140,
       "cpu_units": 2048,
+      "environment_data": [
+          "SOME_VAR=great-value"
+      ],
       "container_name": "bbangert/ap-loadtester:latest",
       "additional_command_args": "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:notification_forever,1000,1,0'"
     }
