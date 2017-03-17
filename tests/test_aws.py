@@ -12,6 +12,9 @@ from tests import fixtures
 class TestECSManager(unittest.TestCase):
     def _make_FUT(self, plan=None):
         from ardere.aws import ECSManager
+        os.environ["s3_ready_bucket"] = "test_bucket"
+        os.environ["ecs_profile"] = "arn:something:fantastic:::"
+        os.environ["container_log_group"] = "ardere"
         self.boto_mock = mock.Mock()
         ECSManager.boto = self.boto_mock
         if not plan:
@@ -21,10 +24,10 @@ class TestECSManager(unittest.TestCase):
     def test_init(self):
         ecs = self._make_FUT()
         eq_(ecs._plan["plan_run_uuid"], ecs._plan_uuid)
+        eq_(ecs.plan_uuid, ecs._plan_uuid)
 
     def test_ready_file(self):
         ecs = self._make_FUT()
-        os.environ["s3_ready_bucket"] = "test_bucket"
         ready_filename = ecs.s3_ready_file
         ok_("test_bucket" in ready_filename)
         ok_(ecs._plan_uuid in ready_filename)
@@ -59,7 +62,6 @@ class TestECSManager(unittest.TestCase):
         eq_(result, {"t2.medium": 1})
 
     def test_request_instances(self):
-        os.environ["ecs_profile"] = "arn:something:fantastic:::"
         instances = {
             "t2.medium": 10
         }
@@ -76,7 +78,6 @@ class TestECSManager(unittest.TestCase):
         )
 
     def test_create_service(self):
-        os.environ["s3_ready_bucket"] = "test_bucket"
         ecs = self._make_FUT()
 
         step = ecs._plan["steps"][0]

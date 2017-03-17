@@ -38,12 +38,17 @@ class ECSManager(object):
     }
 
     def __init__(self, plan):
-        # type: (str) -> None
+        # type: (Dict[str, Any]) -> None
         """Create and return a ECSManager for a cluster of the given name."""
         self._ecs_client = self.boto.client('ecs')
         self._ec2_client = self.boto.client('ec2')
         self._ecs_name = plan["ecs_name"]
         self._plan = plan
+
+        # Pull out the env vars
+        self.s3_ready_bucket = os.environ["s3_ready_bucket"]
+        self.container_log_group = os.environ["container_log_group"]
+        self.ecs_profile = os.environ["ecs_profile"]
 
         if "plan_run_uuid" not in plan:
             plan["plan_run_uuid"] = str(uuid.uuid4())
@@ -51,9 +56,13 @@ class ECSManager(object):
         self._plan_uuid = plan["plan_run_uuid"]
 
     @property
+    def plan_uuid(self):
+        return self._plan_uuid
+
+    @property
     def s3_ready_file(self):
         return "https://s3.amazonaws.com/{bucket}/{key}".format(
-            bucket=os.environ["s3_ready_bucket"],
+            bucket=self.s3_ready_bucket,
             key="{}.ready".format(self._plan_uuid)
         )
 
@@ -112,7 +121,7 @@ class ECSManager(object):
                 InstanceType=instance_type,
                 UserData="#!/bin/bash \necho ECS_CLUSTER='" + self._ecs_name +
                          "' >> /etc/ecs/ecs.config",
-                IamInstanceProfile={"Arn": os.environ["ecs_profile"]}
+                IamInstanceProfile={"Arn": self.ecs_profile}
             )
 
             # Track returned instances for tagging step
@@ -133,17 +142,17 @@ class ECSManager(object):
         logger.info("CreateService called with: {}".format(step))
 
         # Prep the shell command
-        shell_command = [
-            'sh', '-c', '"$WAITFORCLUSTER"',
-            'waitforcluster.sh', self.s3_ready_file,
-            str(step.get("run_delay", 0))
-        ]
-        shell_command2 = ' '.join(shell_command) + ' && ' + step[
-            "additional_command_args"]
-        shell_command3 = ['sh', '-c', '{}'.format(shell_command2)]
+        wfc_var = '__ARDERE_WAITFORCLUSTER_SH__'
+        wfc_cmd = 'sh -c "${}" waitforcluster.sh {} {}'.format(
+            wfc_var,
+            self.s3_ready_file,
+            step.get("run_delay", 0)
+        )
+        service_cmd = step["additional_command_args"]
+        cmd = ['sh', '-c', '{} && {}'.format(wfc_cmd, service_cmd)]
 
         # Prep the env vars
-        env_vars = [{"name": "WAITFORCLUSTER", "value": shell_script}]
+        env_vars = [{"name": wfc_var, "value": shell_script}]
         for env_var in step.get("environment_data", []):
             name, value = env_var.split("=", 1)
             env_vars.append({"name": name, "value": value})
@@ -160,7 +169,17 @@ class ECSManager(object):
                     # using only memoryReservation sets no hard limit
                     "memoryReservation": 256,
                     "environment": env_vars,
-                    "entryPoint": shell_command3
+                    "entryPoint": cmd,
+                    "logConfiguration": {
+                        "logDriver": "awslogs",
+                        "options": {
+                            "awslogs-group": self.container_log_group,
+                            "awslogs-region": "us-east-1",
+                            "awslogs-stream-prefix": "ardere-{}".format(
+                                self.plan_uuid
+                            )
+                        }
+                    }
                 }
             ],
             placementConstraints=[
