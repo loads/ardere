@@ -23,6 +23,8 @@ provider:
         - Arn
     s3_ready_bucket:
       Ref: "S3ReadyBucket"
+    container_log_group:
+      Ref: "ContainerLogs"
 
   iamRoleStatements:
     -  Effect: "Allow"
@@ -73,17 +75,17 @@ provider:
 
 functions:
   populate_missing_instances:
-    handler: ardere.handler.populate_missing_instances
+    handler: handler.populate_missing_instances
   create_ecs_services:
-    handler: ardere.handler.create_ecs_services
+    handler: handler.create_ecs_services
   wait_for_cluster_ready:
-    handler: ardere.handler.wait_for_cluster_ready
+    handler: handler.wait_for_cluster_ready
   signal_cluster_start:
-    handler: ardere.handler.signal_cluster_start
+    handler: handler.signal_cluster_start
   check_for_cluster_done:
-    handler: ardere.handler.check_for_cluster_done
+    handler: handler.check_for_cluster_done
   cleanup_cluster:
-    handler: ardere.handler.cleanup_cluster
+    handler: handler.cleanup_cluster
 
 stepFunctions:
   stateMachines:
@@ -137,6 +139,13 @@ stepFunctions:
           Type: Task
           Resource: check_for_cluster_done
           Next: "Wait for new Cluster Check"
+          Retry:
+            -
+              ErrorEquals:
+                - NoSuchKey
+              IntervalSeconds: 10
+              MaxAttempts: 4
+              BackoffRate: 1
           Catch:
             -
               ErrorEquals:
@@ -193,6 +202,10 @@ resources:
                     - "logs:CreateLogStream"
                     - "logs:PutLogEvents"
                   Resource: "*"
+    ContainerLogs:
+      Type: "AWS::Logs::LogGroup"
+      Properties:
+        RetentionInDays: 1
     EC2ContainerProfile:
       Type: "AWS::IAM::InstanceProfile"
       Properties:
