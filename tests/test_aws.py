@@ -96,6 +96,10 @@ class TestECSManager(unittest.TestCase):
 
         eq_(step["serviceArn"], "arn:of:some:service::")
         ecs._ecs_client.register_task_definition.assert_called()
+        _, kwargs = ecs._ecs_client.register_task_definition.call_args
+        container_def = kwargs["containerDefinitions"][0]
+
+        eq_(container_def["cpu"], 1536)
 
         _, kwargs = ecs._ecs_client.register_task_definition.call_args
         container_def = kwargs["containerDefinitions"][0]

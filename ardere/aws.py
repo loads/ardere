@@ -23,6 +23,45 @@ shell_path = os.path.join(parent_dir_path, "src", "shell",
 with open(shell_path, 'r') as f:
     shell_script = f.read()
 
+# List tracking vcpu's of all instance types for cpu unit reservations
+# We are intentionally leaving out the following instance types as they're
+# considered overkill for load-testing purposes or any instance req's we have
+# experienced so far:
+#     P2, G2, F1, I3, D2
+ec2_type_by_vcpu = {
+    1: ["t2.nano", "t2.micro", "t2.small", "m3.medium"],
+    2: ["t2.medium", "t2.large", "m3.large", "m4.large", "c3.large",
+        "c4.large", "r3.large", "r4.large"],
+    4: ["t2.xlarge", "m3.xlarge", "m4.xlarge", "c3.xlarge", "c4.xlarge",
+        "r3.xlarge", "r4.xlarge"],
+    8: ["t2.2xlarge", "m3.2xlarge", "m4.2xlarge", "c3.2xlarge", "c4.2xlarge",
+        "r3.2xlarge", "r4.2xlarge"],
+    16: ["m4.4xlarge", "c3.4xlarge", "c4.4xlarge", "r3.4xlarge", "r4.4xlarge"],
+    32: ["c3.8xlarge", "r3.8xlarge", "r4.8xlarge"],
+    36: ["c4.8xlarge"],
+    40: ["m4.10xlarge"],
+    64: ["m4.16xlarge", "x1.16xlarge", "r4.16xlarge"],
+    128: ["x1.32xlarge"]
+}
+
+# Build a list of vcpu's by instance type
+ec2_vcpu_by_type = {}
+for vcpu, instance_types in ec2_type_by_vcpu.items():
+    for instance_type in instance_types:
+        ec2_vcpu_by_type[instance_type] = vcpu
+
+
+def cpu_units_for_instance_type(instance_type):
+    """Calculate how many CPU units to allocate for an instance_type
+
+    We calculate cpu_units as 1024 * vcpu's for each instance to allocate
+    almost the entirety of the instance's cpu units to the load-testing
+    container. We take out 512 to ensure some leftover capacity for other
+    utility containers we run with the load-testing container.
+
+    """
+    return (ec2_vcpu_by_type[instance_type] * 1024) - 512
+
 
 class ECSManager(object):
     """ECS Manager queries and manages an ECS cluster"""
@@ -160,11 +199,15 @@ class ECSManager(object):
         # ECS wants a family name for task definitions, no spaces, 255 chars
         family_name = step["name"] + "-" + self._plan_uuid
 
+        # Use cpu_unit if provided, otherwise monopolize
+        cpu_units = step.get("cpu_units",
+                             cpu_units_for_instance_type(step["instance_type"]))
+
         # Setup the container definition
         container_def = {
             "name": step["name"],
             "image": step["container_name"],
-            "cpu": step["cpu_units"],
+            "cpu": cpu_units,
             # use host network mode for optimal performance
             "networkMode": "host",
 

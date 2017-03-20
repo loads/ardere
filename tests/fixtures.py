@@ -9,7 +9,6 @@ sample_basic_test_plan = """
       "instance_count": 1,
       "instance_type": "t2.medium",
       "run_max_time": 140,
-      "cpu_units": 2048,
       "environment_data": [
           "SOME_VAR=great-value"
       ],
@@ -56,7 +55,6 @@ future_hypothetical_test="""
     "instance_count": 1,
     "instance_type": "t2.medium",
     "run_max_time": 140,
-    "cpu_units": 2048,
     "container_name": "bbangert/pushgo:1.5rc4",
     "port_mapping": "8080,8081,3000,8082",
     "load_balancer": {
