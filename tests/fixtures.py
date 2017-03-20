@@ -20,6 +20,35 @@ sample_basic_test_plan = """
 }
 """
 
+sample_toml = """
+ecs_name = "ardere-test"
+name = "connection loadtest"
+description = "autopush: connect and idle forever"
+
+
+[[steps]]
+    name = "***************** RUN #01 ***********************"
+    instance_count = 8
+    instance_type = "m3.medium"
+    container_name = "bbangert/ap-loadtester:latest"
+    additional_command_args = "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:connect_and_idle_forever,10000,5,0'"
+    run_max_time = 300
+    volume_mapping = "/var/log:/var/log/$RUN_ID:rw"
+    docker_series = "push_tests"
+
+[[steps]]
+    name = "***************** RUN #02 ***********************"
+    instance_count = 8
+    run_delay = 330
+    instance_type = "m3.medium"
+    container_name = "bbangert/ap-loadtester:latest"
+    additional_command_args = "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:connect_and_idle_forever,10000,5,0'"
+    run_max_time = 300
+    volume_mapping = "/var/log:/var/log/$RUN_ID:rw"
+    docker_series = "push_tests"
+
+"""
+
 future_hypothetical_test="""
 {
     "name": "TestCluster",

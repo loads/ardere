@@ -5,6 +5,7 @@ from collections import defaultdict
 
 import boto3
 import botocore
+import toml
 from typing import Any, Dict, List  # noqa
 
 from ardere.aws import ECSManager
@@ -31,9 +32,13 @@ class AsynchronousPlanRunner(object):
     def __init__(self, event, context):
         logger.info("Called with {}".format(event))
         logger.info("Environ: {}".format(os.environ))
-        self.ecs = ECSManager(plan=event)
+
+        # Load our TOML if needed
+        event = self._load_toml(event)
+
         self.event = event
         self.context = context
+        self.ecs = ECSManager(plan=event)
 
     def _build_instance_map(self):
         """Given a JSON test-plan, build and return a dict of instance types
@@ -51,6 +56,10 @@ class AsynchronousPlanRunner(object):
             [x.get("run_delay", 0) + x["run_max_time"] for x in
              self.event["steps"]]
         )
+
+    def _load_toml(self, event):
+        """Loads TOML if necessary"""
+        return toml.loads(event["toml"]) if "toml" in event else event
 
     def populate_missing_instances(self):
         """Populate any missing EC2 instances needed for the test plan in the

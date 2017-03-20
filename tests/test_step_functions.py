@@ -36,6 +36,15 @@ class TestAsyncPlanRunner(unittest.TestCase):
         result = self.runner._find_test_plan_duration()
         eq_(result, 140)
 
+    def test_load_toml(self):
+        from ardere.step_functions import AsynchronousPlanRunner
+
+        self.runner = AsynchronousPlanRunner({"toml": fixtures.sample_toml},
+                                             None)
+        eq_(len(self.runner.event["steps"]), 2)
+        eq_(self.runner.event["steps"][0]["instance_count"], 8)
+        eq_(self.runner.event["ecs_name"], "ardere-test")
+
     def test_populate_missing_instances(self):
         self.runner.populate_missing_instances()
         self.mock_ecs.query_active_instances.assert_called()
