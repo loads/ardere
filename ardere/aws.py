@@ -159,28 +159,43 @@ class ECSManager(object):
 
         # ECS wants a family name for task definitions, no spaces, 255 chars
         family_name = step["name"] + "-" + self._plan_uuid
+
+        # Setup the container definition
+        container_def = {
+            "name": step["name"],
+            "image": step["container_name"],
+            "cpu": step["cpu_units"],
+            # use host network mode for optimal performance
+            "networkMode": "host",
+
+            # using only memoryReservation sets no hard limit
+            "memoryReservation": 256,
+            "environment": env_vars,
+            "entryPoint": cmd,
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": self.container_log_group,
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "ardere-{}".format(
+                        self.plan_uuid
+                    )
+                }
+            }
+        }
+
+        if "port_mapping" in step:
+            ports = []
+            for port_map in step["port_mapping"].split(","):
+                ports.append({
+                    "containerPort": int(port_map)
+                })
+            container_def["portMappings"] = ports
+
         task_response = self._ecs_client.register_task_definition(
             family=family_name,
             containerDefinitions=[
-                {
-                    "name": step["name"],
-                    "image": step["container_name"],
-                    "cpu": step["cpu_units"],
-                    # using only memoryReservation sets no hard limit
-                    "memoryReservation": 256,
-                    "environment": env_vars,
-                    "entryPoint": cmd,
-                    "logConfiguration": {
-                        "logDriver": "awslogs",
-                        "options": {
-                            "awslogs-group": self.container_log_group,
-                            "awslogs-region": "us-east-1",
-                            "awslogs-stream-prefix": "ardere-{}".format(
-                                self.plan_uuid
-                            )
-                        }
-                    }
-                }
+                container_def
             ],
             placementConstraints=[
                 # Ensure the service is confined to the right instance type
