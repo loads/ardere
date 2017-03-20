@@ -187,13 +187,12 @@ class ECSManager(object):
             self.s3_ready_file,
             step.get("run_delay", 0)
         )
-        service_cmd = step["additional_command_args"]
+        service_cmd = step["command"]
         cmd = ['sh', '-c', '{} && {}'.format(wfc_cmd, service_cmd)]
 
         # Prep the env vars
         env_vars = [{"name": wfc_var, "value": shell_script}]
-        for env_var in step.get("environment_data", []):
-            name, value = env_var.split("=", 1)
+        for name, value in step.get("env", {}).items():
             env_vars.append({"name": name, "value": value})
 
         # ECS wants a family name for task definitions, no spaces, 255 chars
@@ -208,8 +207,6 @@ class ECSManager(object):
             "name": step["name"],
             "image": step["container_name"],
             "cpu": cpu_units,
-            # use host network mode for optimal performance
-            "networkMode": "host",
 
             # using only memoryReservation sets no hard limit
             "memoryReservation": 256,
@@ -228,11 +225,7 @@ class ECSManager(object):
         }
 
         if "port_mapping" in step:
-            ports = []
-            for port_map in step["port_mapping"].split(","):
-                ports.append({
-                    "containerPort": int(port_map)
-                })
+            ports = [{"containerPort": port} for port in step["port_mapping"]]
             container_def["portMappings"] = ports
 
         task_response = self._ecs_client.register_task_definition(
@@ -240,6 +233,9 @@ class ECSManager(object):
             containerDefinitions=[
                 container_def
             ],
+            # use host network mode for optimal performance
+            networkMode="host",
+
             placementConstraints=[
                 # Ensure the service is confined to the right instance type
                 {

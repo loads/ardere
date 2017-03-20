@@ -32,6 +32,7 @@ provider:
          - "ecs:CreateCluster"
          - "ecs:ListServices"
          - "ecs:ListContainerInstances"
+         - "ecs:DescribeClusters"
          - "ecs:DescribeServices"
          - "ecs:DescribeTaskDefinition"
          - "ecs:DescribeContainerInstances"

@@ -6,16 +6,59 @@ from collections import defaultdict
 import boto3
 import botocore
 import toml
+from marshmallow import (
+    Schema,
+    decorators,
+    fields,
+    validate,
+    ValidationError,
+)
 from typing import Any, Dict, List  # noqa
 
-from ardere.aws import ECSManager
+from ardere.aws import (
+    ECSManager,
+    ec2_vcpu_by_type,
+)
 from ardere.exceptions import (
     ServicesStartingException,
-    ShutdownPlanException
+    ShutdownPlanException,
+    ValidationException,
 )
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+class StepValidator(Schema):
+    name = fields.String(required=True)
+    instance_count = fields.Int(required=True)
+    instance_type = fields.String(
+        required=True,
+        validate=validate.OneOf(ec2_vcpu_by_type.keys())
+    )
+    run_max_time = fields.Int(required=True)
+    run_delay = fields.Int()
+    container_name = fields.String(required=True)
+    command = fields.String(required=True)
+    port_mapping = fields.List(fields.Int())
+    env = fields.Dict()
+
+
+class PlanValidator(Schema):
+    ecs_name = fields.String(required=True)
+    name = fields.String(required=True)
+
+    steps = fields.Nested(StepValidator, many=True)
+
+    @decorators.validates("ecs_name")
+    def validate_ecs_name(self, value):
+        """Verify a cluster exists for this name"""
+        client = self.context["boto"].client('ecs')
+        response = client.describe_clusters(
+            clusters=[value]
+        )
+        if not response.get("clusters"):
+            raise ValidationError("No cluster with the provided name.")
 
 
 class AsynchronousPlanRunner(object):
@@ -61,6 +104,14 @@ class AsynchronousPlanRunner(object):
         """Loads TOML if necessary"""
         return toml.loads(event["toml"]) if "toml" in event else event
 
+    def _validate_plan(self):
+        """Validates that the loaded plan is correct"""
+        schema = PlanValidator()
+        schema.context["boto"] = self.boto
+        _, errors = schema.load(self.event)
+        if errors:
+            raise ValidationException("Failed to validate: {}".format(errors))
+
     def populate_missing_instances(self):
         """Populate any missing EC2 instances needed for the test plan in the
         cluster
@@ -68,6 +119,9 @@ class AsynchronousPlanRunner(object):
         Step 1
 
         """
+        # First, validate the test plan, done only as part of step 1
+        self._validate_plan()
+
         needed = self._build_instance_map()
         logger.info("Plan instances needed: {}".format(needed))
         current_instances = self.ecs.query_active_instances()

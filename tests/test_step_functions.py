@@ -50,6 +50,14 @@ class TestAsyncPlanRunner(unittest.TestCase):
         self.mock_ecs.query_active_instances.assert_called()
         self.mock_ecs.request_instances.assert_called()
 
+    def test_populate_missing_instances_fail(self):
+        from ardere.exceptions import ValidationException
+        mock_client = mock.Mock()
+        self.mock_boto.client.return_value = mock_client
+        mock_client.describe_clusters.return_value = {"clusters": []}
+        assert_raises(ValidationException,
+                      self.runner.populate_missing_instances)
+
     def test_create_ecs_services(self):
         self.runner.create_ecs_services()
         self.mock_ecs.create_services.assert_called_with(self.plan["steps"])
@@ -133,3 +141,28 @@ class TestAsyncPlanRunner(unittest.TestCase):
         )
         self.runner.cleanup_cluster()
         mock_s3.Object.assert_called()
+
+
+class TestValidation(unittest.TestCase):
+    def _make_FUT(self):
+        from ardere.step_functions import PlanValidator
+        return PlanValidator()
+
+    def test_validate_success(self):
+        schema = self._make_FUT()
+        schema.context["boto"] = mock.Mock()
+        plan = json.loads(fixtures.sample_basic_test_plan)
+        data, errors = schema.load(plan)
+        eq_(errors, {})
+        eq_(len(data["steps"]), len(plan["steps"]))
+
+    def test_validate_fail(self):
+        schema = self._make_FUT()
+        schema.context["boto"] = mock_boto = mock.Mock()
+        mock_client = mock.Mock()
+        mock_boto.client.return_value = mock_client
+        mock_client.describe_clusters.return_value = {"clusters": []}
+        plan = json.loads(fixtures.sample_basic_test_plan)
+        data, errors = schema.load(plan)
+        eq_(len(data["steps"]), len(plan["steps"]))
+        eq_(len(errors), 1)
