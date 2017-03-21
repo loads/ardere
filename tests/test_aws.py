@@ -104,7 +104,6 @@ class TestECSManager(unittest.TestCase):
         _, kwargs = ecs._ecs_client.register_task_definition.call_args
         container_def = kwargs["containerDefinitions"][0]
         ok_("portMappings" in container_def)
-        eq_(container_def["networkMode"], "host")
 
     def test_create_services(self):
         ecs = self._make_FUT()

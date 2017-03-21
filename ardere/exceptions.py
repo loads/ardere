@@ -4,3 +4,7 @@ class ServicesStartingException(Exception):
 
 class ShutdownPlanException(Exception):
     """Exception to indicate the Plan should be Shutdown"""
+
+
+class ValidationException(Exception):
+    """Exception to indicate validation error parsing input"""
