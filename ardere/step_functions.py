@@ -37,16 +37,26 @@ class StepValidator(Schema):
         validate=validate.OneOf(ec2_vcpu_by_type.keys())
     )
     run_max_time = fields.Int(required=True)
-    run_delay = fields.Int()
+    run_delay = fields.Int(missing=0)
     container_name = fields.String(required=True)
-    command = fields.String(required=True)
+    cmd = fields.String(required=True)
     port_mapping = fields.List(fields.Int())
     env = fields.Dict()
+
+
+class InfluxOptions(Schema):
+    enabled = fields.Bool(missing=True)
+    instance_type = fields.String(
+        missing="c4.large",
+        validate=validate.OneOf(ec2_vcpu_by_type.keys())
+    )
+    tear_down = fields.Bool(missing=False)
 
 
 class PlanValidator(Schema):
     ecs_name = fields.String(required=True)
     name = fields.String(required=True)
+    influx_options = fields.Nested(InfluxOptions, missing={})
 
     steps = fields.Nested(StepValidator, many=True)
 
@@ -108,9 +118,12 @@ class AsynchronousPlanRunner(object):
         """Validates that the loaded plan is correct"""
         schema = PlanValidator()
         schema.context["boto"] = self.boto
-        _, errors = schema.load(self.event)
+        data, errors = schema.load(self.event)
         if errors:
             raise ValidationException("Failed to validate: {}".format(errors))
+
+        # Replace our event with the validated
+        self.event = data
 
     def populate_missing_instances(self):
         """Populate any missing EC2 instances needed for the test plan in the
@@ -123,6 +136,11 @@ class AsynchronousPlanRunner(object):
         self._validate_plan()
 
         needed = self._build_instance_map()
+
+        # Ensure we have the metrics instance
+        if self.event["influx_options"]["enabled"]:
+            needed[self.event["influx_options"]["instance_type"]] += 1
+
         logger.info("Plan instances needed: {}".format(needed))
         current_instances = self.ecs.query_active_instances()
         missing_instances = self.ecs.calculate_missing_instances(
@@ -133,10 +151,42 @@ class AsynchronousPlanRunner(object):
             self.ecs.request_instances(missing_instances)
         return self.event
 
+    def ensure_metrics_available(self):
+        """Start the metrics service, ensure its running, and its IP is known
+
+        Step 2
+
+        """
+        if not self.event["influx_options"]["enabled"]:
+            return self.event
+
+        # Is the service already running?
+        metrics = self.ecs.locate_metrics_service()
+
+        if not metrics:
+            # Start the metrics service, throw a retry
+            self.ecs.create_influxdb_service(self.event["influx_options"])
+            raise ServicesStartingException("Triggered metrics start")
+
+        deploy = metrics["deployments"][0]
+        ready = deploy["desiredCount"] == deploy["runningCount"]
+        if not ready:
+            raise ServicesStartingException("Waiting for metrics")
+
+        # Populate the IP of the metrics service
+        metric_ip = self.ecs.locate_metrics_container_ip()
+
+        if not metric_ip:
+            raise Exception("Unable to locate metrics IP even though its "
+                            "running")
+
+        self.event["influxdb_public_ip"] = metric_ip
+        return self.event
+
     def create_ecs_services(self):
         """Create all the ECS services needed
 
-        Step 2
+        Step 3
 
         """
         self.ecs.create_services(self.event["steps"])
@@ -145,7 +195,7 @@ class AsynchronousPlanRunner(object):
     def wait_for_cluster_ready(self):
         """Check all the ECS services to see if they're ready
 
-        Step 3
+        Step 4
 
         """
         if not self.ecs.all_services_ready(self.event["steps"]):
@@ -155,7 +205,7 @@ class AsynchronousPlanRunner(object):
     def signal_cluster_start(self):
         """Drop a ready file in S3 to trigger the test plan to being
 
-        Step 4
+        Step 5
 
         """
         s3_client = self.boto.client('s3')
@@ -174,7 +224,7 @@ class AsynchronousPlanRunner(object):
         """Check all the ECS services to see if they've run for their
         specified duration
 
-        Step 5
+        Step 6
 
         """
         # Check to see if the S3 file is still around
@@ -204,7 +254,7 @@ class AsynchronousPlanRunner(object):
     def cleanup_cluster(self):
         """Shutdown all ECS services and deregister all task definitions
 
-        Step 6
+        Step 7
 
         """
         self.ecs.shutdown_plan(self.event["steps"])

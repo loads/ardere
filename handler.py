@@ -12,6 +12,9 @@ def populate_missing_instances(event, context):
     runner = AsynchronousPlanRunner(event, context)
     return runner.populate_missing_instances()
 
+def ensure_metrics_available(event, context):
+    runner = AsynchronousPlanRunner(event, context)
+    return runner.ensure_metrics_available()
 
 def create_ecs_services(event, context):
     runner = AsynchronousPlanRunner(event, context)

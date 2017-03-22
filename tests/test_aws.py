@@ -19,6 +19,9 @@ class TestECSManager(unittest.TestCase):
         ECSManager.boto = self.boto_mock
         if not plan:
             plan = json.loads(fixtures.sample_basic_test_plan)
+            plan["influx_options"] = dict(
+                tear_down=False
+            )
         return ECSManager(plan)
 
     def test_init(self):
@@ -76,6 +79,63 @@ class TestECSManager(unittest.TestCase):
                 {'Value': u'ardere-test', 'Key': 'ECSCluster'}
             ]
         )
+
+    def test_locate_metrics_container_ip(self):
+        ecs = self._make_FUT()
+        ecs._ecs_client.list_container_instances.return_value = {
+            "containerInstanceArns": ["arn:of:some:container::"]
+        }
+        ecs._ecs_client.describe_container_instances.return_value = {
+            "containerInstances": [
+                {"ec2InstanceId": "e-28193823"}
+            ]
+        }
+        mock_resource = mock.Mock()
+        ecs.boto.resource.return_value = mock_resource
+        ecs.locate_metrics_container_ip()
+        ecs.boto.resource.assert_called()
+
+    def test_locate_metrics_container_ip_not_found(self):
+        ecs = self._make_FUT()
+        ecs._ecs_client.list_container_instances.return_value = {
+            "containerInstanceArns": []
+        }
+        result = ecs.locate_metrics_container_ip()
+        eq_(result, None)
+
+    def test_locate_metrics_service(self):
+        ecs = self._make_FUT()
+        ecs._ecs_client.describe_services.return_value = {
+            "services": [
+                {"stuff": 1}
+            ]
+        }
+        result = ecs.locate_metrics_service()
+        eq_(result, {"stuff": 1})
+
+    def test_locate_metrics_service_not_found(self):
+        ecs = self._make_FUT()
+        ecs._ecs_client.describe_services.return_value = {
+            "services": []
+        }
+        result = ecs.locate_metrics_service()
+        eq_(result, None)
+
+    def test_create_influxdb_service(self):
+        ecs = self._make_FUT()
+
+        # Setup mocks
+        ecs._ecs_client.register_task_definition.return_value = {
+            "taskDefinition": {
+                "taskDefinitionArn": "arn:of:some:task::"
+            }
+        }
+        ecs._ecs_client.create_service.return_value = {
+            "service": {"serviceArn": "arn:of:some:service::"}
+        }
+
+        result = ecs.create_influxdb_service(dict(instance_type="c4.large"))
+        eq_(result["service_arn"], "arn:of:some:service::")
 
     def test_create_service(self):
         ecs = self._make_FUT()
@@ -190,6 +250,10 @@ class TestECSManager(unittest.TestCase):
         ]
 
         ecs = self._make_FUT()
+        ecs.locate_metrics_service = mock.Mock()
+        ecs.locate_metrics_service.return_value = dict(
+            serviceArn="arn:456:::"
+        )
         ecs._ecs_client.get_paginator.return_value = mock_paginator
         ecs._ecs_client.describe_task_definition.return_value = {
             "taskDefinition": {"taskDefinitionArn": "arn:task:::"}
@@ -208,6 +272,10 @@ class TestECSManager(unittest.TestCase):
         ]
 
         ecs = self._make_FUT()
+        ecs.locate_metrics_service = mock.Mock()
+        ecs.locate_metrics_service.return_value = dict(
+            serviceArn="arn:456:::"
+        )
         ecs._ecs_client.get_paginator.return_value = mock_paginator
         ecs._ecs_client.describe_task_definition.return_value = {
             "taskDefinition": {"taskDefinitionArn": "arn:task:::"}
@@ -228,6 +296,10 @@ class TestECSManager(unittest.TestCase):
         ]
 
         ecs = self._make_FUT()
+        ecs.locate_metrics_service = mock.Mock()
+        ecs.locate_metrics_service.return_value = dict(
+            serviceArn="arn:456:::"
+        )
         ecs._plan["steps"] = ecs._plan["steps"][:1]
         ecs._ecs_client.get_paginator.return_value = mock_paginator
         ecs._ecs_client.describe_task_definition.side_effect = ClientError(
@@ -246,6 +318,10 @@ class TestECSManager(unittest.TestCase):
         ]
 
         ecs = self._make_FUT()
+        ecs.locate_metrics_service = mock.Mock()
+        ecs.locate_metrics_service.return_value = dict(
+            serviceArn="arn:456:::"
+        )
         ecs._ecs_client.get_paginator.return_value = mock_paginator
         ecs._ecs_client.describe_task_definition.return_value = {
             "taskDefinition": {"taskDefinitionArn": "arn:task:::"}
@@ -266,6 +342,11 @@ class TestECSManager(unittest.TestCase):
         ]
 
         ecs = self._make_FUT()
+        ecs.locate_metrics_service = mock.Mock()
+        ecs.locate_metrics_service.return_value = dict(
+            serviceArn="arn:456:::"
+        )
+        ecs._plan["influx_options"]["tear_down"] = True
         ecs._ecs_client.get_paginator.return_value = mock_paginator
         ecs._ecs_client.describe_task_definition.return_value = {
             "taskDefinition": {"taskDefinitionArn": "arn:task:::"}

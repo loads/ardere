@@ -23,6 +23,8 @@ provider:
         - Arn
     s3_ready_bucket:
       Ref: "S3ReadyBucket"
+    metrics_bucket:
+      Ref: "MetricsBucket"
     container_log_group:
       Ref: "ContainerLogs"
 
@@ -77,6 +79,8 @@ provider:
 functions:
   populate_missing_instances:
     handler: handler.populate_missing_instances
+  ensure_metrics_available:
+    handler: handler.ensure_metrics_available
   create_ecs_services:
     handler: handler.create_ecs_services
   wait_for_cluster_ready:
@@ -98,6 +102,17 @@ stepFunctions:
         "Populate Missing Instances":
           Type: Task
           Resource: populate_missing_instances
+          Next: "Ensure Metrics Available"
+        "Ensure Metrics Available":
+          Type: Task
+          Resource: ensure_metrics_available
+          Retry:
+            -
+              ErrorEquals:
+                - ServicesStartingException
+              IntervalSeconds: 10
+              MaxAttempts: 60
+              BackoffRate: 1
           Next: "Create ECS Services"
         "Create ECS Services":
           Type: Task
@@ -167,7 +182,11 @@ resources:
     S3ReadyBucket:
       Type: "AWS::S3::Bucket"
       Properties:
-        AccessControl: "PublicRead"
+        AccessControl: "AuthenticatedRead"
+    MetricsBucket:
+      Type: "AWS::S3::Bucket"
+      Properties:
+        AccessControl: "AuthenticatedRead"
     EC2ContainerRole:
       Type: "AWS::IAM::Role"
       Properties:

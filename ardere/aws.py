@@ -76,6 +76,8 @@ class ECSManager(object):
         "us-west-2": "ami-022b9262"
     }
 
+    influxdb_container = "influxdb:1.1-alpine"
+
     def __init__(self, plan):
         # type: (Dict[str, Any]) -> None
         """Create and return a ECSManager for a cluster of the given name."""
@@ -90,7 +92,7 @@ class ECSManager(object):
         self.ecs_profile = os.environ["ecs_profile"]
 
         if "plan_run_uuid" not in plan:
-            plan["plan_run_uuid"] = str(uuid.uuid4())
+            plan["plan_run_uuid"] = uuid.uuid4().hex
 
         self._plan_uuid = plan["plan_run_uuid"]
 
@@ -108,6 +110,9 @@ class ECSManager(object):
     def family_name(self, step):
         """Generate a consistent family name for a given step"""
         return step["name"] + "-" + self._plan_uuid
+
+    def metrics_family_name(self):
+        return "{}-metrics".format(self._ecs_name)
 
     def query_active_instances(self):
         # type: () -> Dict[str, int]
@@ -175,6 +180,98 @@ class ECSManager(object):
             ]
         )
 
+    def locate_metrics_container_ip(self):
+        """Locates the metrics container IP"""
+        response = self._ecs_client.list_container_instances(
+            cluster=self._ecs_name,
+            filter="task:group == service:metrics"
+        )
+        if not response["containerInstanceArns"]:
+            return None
+
+        container_arn = response["containerInstanceArns"][0]
+        response = self._ecs_client.describe_container_instances(
+            cluster=self._ecs_name,
+            containerInstances=[container_arn]
+        )
+
+        ec2_instance_id = response["containerInstances"][0]["ec2InstanceId"]
+        instance = self.boto.resource("ec2").Instance(ec2_instance_id)
+        return instance.public_ip_address
+
+    def locate_metrics_service(self):
+        """Locate and return the metrics service arn if any"""
+        response = self._ecs_client.describe_services(
+            cluster=self._ecs_name,
+            services=["metrics"]
+        )
+        if response["services"]:
+            return response["services"][0]
+        else:
+            return None
+
+    def create_influxdb_service(self, options):
+        # type: (Dict[str, Any]) -> Dict[str, Any]
+        """Creates an ECS service to run InfluxDB for metric reporting and
+        returns its info"""
+        logger.info("Creating InfluxDB service with options: {}".format(
+            options))
+
+        task_response = self._ecs_client.register_task_definition(
+            family=self.metrics_family_name(),
+            containerDefinitions=[
+                {
+                    "name": "metrics",
+                    "image": self.influxdb_container,
+                    "cpu": cpu_units_for_instance_type(
+                        options["instance_type"]),
+                    "memoryReservation": 256,
+                    "portMappings": [
+                        {"containerPort": 8086},
+                        {"containerPort": 8088}
+                    ],
+                    "logConfiguration": {
+                        "logDriver": "awslogs",
+                        "options": {
+                            "awslogs-group": self.container_log_group,
+                            "awslogs-region": "us-east-1",
+                            "awslogs-stream-prefix":
+                                "ardere-{}".format(self.plan_uuid)
+                        }
+                    }
+                }
+            ],
+            # use host network mode for optimal performance
+            networkMode="host",
+
+            placementConstraints=[
+                # Ensure the service is confined to the right instance type
+                {
+                    "type": "memberOf",
+                    "expression": "attribute:ecs.instance-type == {}".format(
+                        options["instance_type"]),
+                }
+            ],
+        )
+        task_arn = task_response["taskDefinition"]["taskDefinitionArn"]
+        service_result = self._ecs_client.create_service(
+            cluster=self._ecs_name,
+            serviceName="metrics",
+            taskDefinition=task_arn,
+            desiredCount=1,
+            deploymentConfiguration={
+                "minimumHealthyPercent": 0,
+                "maximumPercent": 100
+            },
+            placementConstraints=[
+                {
+                    "type": "distinctInstance"
+                }
+            ]
+        )
+        service_arn = service_result["service"]["serviceArn"]
+        return dict(task_arn=task_arn, service_arn=service_arn)
+
     def create_service(self, step):
         # type: (Dict[str, Any]) -> Dict[str, Any]
         """Creates an ECS service for a step and returns its info"""
@@ -187,7 +284,7 @@ class ECSManager(object):
             self.s3_ready_file,
             step.get("run_delay", 0)
         )
-        service_cmd = step["command"]
+        service_cmd = step["cmd"]
         cmd = ['sh', '-c', '{} && {}'.format(wfc_cmd, service_cmd)]
 
         # Prep the env vars
@@ -335,6 +432,14 @@ class ECSManager(object):
         for page in response_iterator:
             service_arns.extend(page["serviceArns"])
 
+        # Avoid shutting down metrics if tear down was not requested
+        # We have to exclude it from the services discovered above if we
+        # should NOT tear it down
+        if not self._plan["influx_options"]["tear_down"]:
+            metric_service = self.locate_metrics_service()
+            if metric_service and metric_service["serviceArn"] in service_arns:
+                service_arns.remove(metric_service["serviceArn"])
+
         for service_arn in service_arns:
             try:
                 self._ecs_client.update_service(
@@ -354,10 +459,16 @@ class ECSManager(object):
                 pass
 
         # Locate all the task definitions for this plan
-        for step in steps:
+        step_family_names = [self.family_name(step) for step in steps]
+
+        # Add in the metrics family name if we need to tear_down
+        if self._plan["influx_options"]["tear_down"]:
+            step_family_names.append(self.metrics_family_name())
+
+        for family_name in step_family_names:
             try:
                 response = self._ecs_client.describe_task_definition(
-                    taskDefinition=self.family_name(step)
+                    taskDefinition=family_name
                 )
             except botocore.exceptions.ClientError:
                 continue
