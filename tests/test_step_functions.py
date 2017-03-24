@@ -15,6 +15,9 @@ class TestAsyncPlanRunner(unittest.TestCase):
     def setUp(self):
         self.mock_ecs = mock.Mock()
         self._patcher = mock.patch("ardere.step_functions.ECSManager")
+        self._influx_patcher = mock.patch(
+            "ardere.step_functions.InfluxDBClient")
+        self.mock_influx = self._influx_patcher.start()
         mock_manager = self._patcher.start()
         mock_manager.return_value = self.mock_ecs
 
@@ -25,6 +28,7 @@ class TestAsyncPlanRunner(unittest.TestCase):
         self.runner.boto = self.mock_boto = mock.Mock()
 
     def tearDown(self):
+        self._influx_patcher.stop()
         self._patcher.stop()
 
     def test_build_instance_map(self):
@@ -105,6 +109,7 @@ class TestAsyncPlanRunner(unittest.TestCase):
         self.mock_ecs.locate_metrics_container_ip.return_value = "1.1.1.1"
         self.runner.ensure_metrics_available()
         self.mock_ecs.locate_metrics_container_ip.assert_called()
+        self.mock_influx.assert_called()
 
     def test_ensure_metrics_available_disabled(self):
         self.plan["influx_options"] = dict(enabled=False)

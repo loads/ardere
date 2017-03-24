@@ -18,10 +18,16 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 parent_dir_path = os.path.dirname(dir_path)
 shell_path = os.path.join(parent_dir_path, "src", "shell",
                           "waitforcluster.sh")
+telegraf_path = os.path.join(parent_dir_path, "src", "shell",
+                            "telegraf.toml")
 
-# Load the shell script
+# Load the shell scripts
 with open(shell_path, 'r') as f:
     shell_script = f.read()
+
+with open(telegraf_path, 'r') as f:
+    telegraf_script = f.read()
+
 
 # List tracking vcpu's of all instance types for cpu unit reservations
 # We are intentionally leaving out the following instance types as they're
@@ -70,13 +76,14 @@ class ECSManager(object):
 
     # ECS optimized AMI id's
     ecs_ami_ids = {
-        "us-east-1": "ami-b2df2ca4",
-        "us-east-2": "ami-832b0ee6",
-        "us-west-1": "ami-dd104dbd",
-        "us-west-2": "ami-022b9262"
+        "us-east-1": "ami-275ffe31",
+        "us-east-2": "ami-62745007",
+        "us-west-1": "ami-689bc208",
+        "us-west-2": "ami-62d35c02"
     }
 
     influxdb_container = "influxdb:1.1-alpine"
+    telegraf_container = "telegraf:1.2-alpine"
 
     def __init__(self, plan):
         # type: (Dict[str, Any]) -> None
@@ -106,6 +113,10 @@ class ECSManager(object):
             bucket=self.s3_ready_bucket,
             key="{}.ready".format(self._plan_uuid)
         )
+
+    @property
+    def influx_db_name(self):
+        return "run-{}".format(self.plan_uuid)
 
     def family_name(self, step):
         """Generate a consistent family name for a given step"""
@@ -205,7 +216,8 @@ class ECSManager(object):
             cluster=self._ecs_name,
             services=["metrics"]
         )
-        if response["services"]:
+        if response["services"] and response["services"][0]["status"] == \
+                "ACTIVE":
             return response["services"][0]
         else:
             return None
@@ -320,15 +332,55 @@ class ECSManager(object):
                 }
             }
         }
-
         if "port_mapping" in step:
             ports = [{"containerPort": port} for port in step["port_mapping"]]
             container_def["portMappings"] = ports
 
+        # Setup the telegraf container definition
+        cmd = """\
+        echo "${__ARDERE_TELEGRAF_CONF__}" > /etc/telegraf/telegraf.conf && \
+        export __ARDERE_TELEGRAF_HOST__=`wget -qO- http://169.254.169.254/latest/meta-data/instance-id` && \
+        telegraf \
+        """
+        cmd = ['sh', '-c', '{}'.format(cmd)]
+        telegraf_def = {
+            "name": "telegraf",
+            "image": self.telegraf_container,
+            "cpu": 512,
+            "memoryReservation": 256,
+            "entryPoint": cmd,
+            "portMappings": [
+                {"containerPort": 8125}
+            ],
+            "environment": [
+                {"name": "__ARDERE_TELEGRAF_CONF__",
+                 "value": telegraf_script},
+                {"name": "__ARDERE_TELEGRAF_STEP__",
+                 "value": step["name"]},
+                {"name": "__ARDERE_INFLUX_ADDR__",
+                 "value": "{}:8086".format(self._plan["influxdb_public_ip"])},
+                {"name": "__ARDERE_INFLUX_DB__",
+                 "value": self.influx_db_name},
+                {"name": "__ARDERE_TELEGRAF_TYPE__",
+                 "value": step["docker_series"]}
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": self.container_log_group,
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "ardere-{}".format(
+                        self.plan_uuid
+                    )
+                }
+            }
+        }
+
         task_response = self._ecs_client.register_task_definition(
             family=family_name,
             containerDefinitions=[
-                container_def
+                container_def,
+                telegraf_def
             ],
             # use host network mode for optimal performance
             networkMode="host",

@@ -14,7 +14,7 @@ sample_basic_test_plan = """
       },
       "port_mapping": [8000, 4000],
       "container_name": "bbangert/ap-loadtester:latest",
-      "cmd": "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:notification_forever,1000,1,0'"
+      "cmd": "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:notification_forever,1000,1,0' --statsd_host=localhost --statsd_port=8125"
     }
   ]
 }

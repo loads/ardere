@@ -6,6 +6,7 @@ from collections import defaultdict
 import boto3
 import botocore
 import toml
+from influxdb import InfluxDBClient
 from marshmallow import (
     Schema,
     decorators,
@@ -42,6 +43,7 @@ class StepValidator(Schema):
     cmd = fields.String(required=True)
     port_mapping = fields.List(fields.Int())
     env = fields.Dict()
+    docker_series = fields.String(missing="default")
 
 
 class InfluxOptions(Schema):
@@ -162,6 +164,7 @@ class AsynchronousPlanRunner(object):
 
         # Is the service already running?
         metrics = self.ecs.locate_metrics_service()
+        logger.info("Metrics info: %s", metrics)
 
         if not metrics:
             # Start the metrics service, throw a retry
@@ -170,6 +173,7 @@ class AsynchronousPlanRunner(object):
 
         deploy = metrics["deployments"][0]
         ready = deploy["desiredCount"] == deploy["runningCount"]
+        logger.info("Deploy info: %s", deploy)
         if not ready:
             raise ServicesStartingException("Waiting for metrics")
 
@@ -180,6 +184,9 @@ class AsynchronousPlanRunner(object):
             raise Exception("Unable to locate metrics IP even though its "
                             "running")
 
+        # Create an influxdb for this run
+        influx_client = InfluxDBClient(host=metric_ip)
+        influx_client.create_database(self.ecs.influx_db_name)
         self.event["influxdb_public_ip"] = metric_ip
         return self.event
 
