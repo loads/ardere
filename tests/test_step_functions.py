@@ -58,6 +58,58 @@ class TestAsyncPlanRunner(unittest.TestCase):
         assert_raises(ValidationException,
                       self.runner.populate_missing_instances)
 
+    def test_ensure_metrics_available_running_create(self):
+        from ardere.exceptions import ServicesStartingException
+
+        self.plan["influx_options"] = dict(enabled=True)
+        self.mock_ecs.locate_metrics_service.return_value = None
+
+        assert_raises(ServicesStartingException,
+                      self.runner.ensure_metrics_available)
+        self.mock_ecs.create_influxdb_service.assert_called()
+
+    def test_ensure_metrics_available_running_waiting(self):
+        from ardere.exceptions import ServicesStartingException
+
+        self.plan["influx_options"] = dict(enabled=True)
+        self.mock_ecs.locate_metrics_service.return_value = {
+            "deployments": [{
+                "desiredCount": 1,
+                "runningCount": 0
+            }]
+        }
+
+        assert_raises(ServicesStartingException,
+                      self.runner.ensure_metrics_available)
+
+    def test_ensure_metrics_available_running_error(self):
+        self.plan["influx_options"] = dict(enabled=True)
+        self.mock_ecs.locate_metrics_service.return_value = {
+            "deployments": [{
+                "desiredCount": 1,
+                "runningCount": 1
+            }]
+        }
+        self.mock_ecs.locate_metrics_container_ip.return_value = None
+
+        assert_raises(Exception, self.runner.ensure_metrics_available)
+
+    def test_ensure_metrics_available_running(self):
+        self.plan["influx_options"] = dict(enabled=True)
+        self.mock_ecs.locate_metrics_service.return_value = {
+            "deployments": [{
+                "desiredCount": 1,
+                "runningCount": 1
+            }]
+        }
+        self.mock_ecs.locate_metrics_container_ip.return_value = "1.1.1.1"
+        self.runner.ensure_metrics_available()
+        self.mock_ecs.locate_metrics_container_ip.assert_called()
+
+    def test_ensure_metrics_available_disabled(self):
+        self.plan["influx_options"] = dict(enabled=False)
+        self.runner.ensure_metrics_available()
+
     def test_create_ecs_services(self):
         self.runner.create_ecs_services()
         self.mock_ecs.create_services.assert_called_with(self.plan["steps"])

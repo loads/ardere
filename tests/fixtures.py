@@ -14,7 +14,7 @@ sample_basic_test_plan = """
       },
       "port_mapping": [8000, 4000],
       "container_name": "bbangert/ap-loadtester:latest",
-      "command": "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:notification_forever,1000,1,0'"
+      "cmd": "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:notification_forever,1000,1,0'"
     }
   ]
 }
@@ -31,7 +31,7 @@ description = "autopush: connect and idle forever"
     instance_count = 8
     instance_type = "m3.medium"
     container_name = "bbangert/ap-loadtester:latest"
-    command = "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:connect_and_idle_forever,10000,5,0'"
+    cmd = "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:connect_and_idle_forever,10000,5,0'"
     run_max_time = 300
     volume_mapping = "/var/log:/var/log/$RUN_ID:rw"
     docker_series = "push_tests"
@@ -42,7 +42,7 @@ description = "autopush: connect and idle forever"
     run_delay = 330
     instance_type = "m3.medium"
     container_name = "bbangert/ap-loadtester:latest"
-    command = "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:connect_and_idle_forever,10000,5,0'"
+    cmd = "./apenv/bin/aplt_testplan wss://autopush.stage.mozaws.net 'aplt.scenarios:connect_and_idle_forever,10000,5,0'"
     run_max_time = 300
     volume_mapping = "/var/log:/var/log/$RUN_ID:rw"
     docker_series = "push_tests"
