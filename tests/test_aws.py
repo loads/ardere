@@ -107,11 +107,11 @@ class TestECSManager(unittest.TestCase):
         ecs = self._make_FUT()
         ecs._ecs_client.describe_services.return_value = {
             "services": [
-                {"stuff": 1}
+                {"stuff": 1, "status": "ACTIVE"}
             ]
         }
         result = ecs.locate_metrics_service()
-        eq_(result, {"stuff": 1})
+        eq_(result, {"stuff": 1, "status": "ACTIVE"})
 
     def test_locate_metrics_service_not_found(self):
         ecs = self._make_FUT()
@@ -141,6 +141,8 @@ class TestECSManager(unittest.TestCase):
         ecs = self._make_FUT()
 
         step = ecs._plan["steps"][0]
+        ecs._plan["influxdb_public_ip"] = "1.1.1.1"
+        step["docker_series"] = "default"
 
         # Setup mocks
         ecs._ecs_client.register_task_definition.return_value = {

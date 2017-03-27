@@ -182,7 +182,7 @@ resources:
     S3ReadyBucket:
       Type: "AWS::S3::Bucket"
       Properties:
-        AccessControl: "AuthenticatedRead"
+        AccessControl: "PublicRead"
     MetricsBucket:
       Type: "AWS::S3::Bucket"
       Properties:
