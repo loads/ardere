@@ -73,12 +73,7 @@ class TestECSManager(unittest.TestCase):
             "Instances": [{"InstanceId": 12345}]
         }
         ecs.request_instances(instances)
-        ecs._ec2_client.create_tags.assert_called_with(
-            Resources=[12345], Tags=[
-                {'Value': 'ardere', 'Key': 'Owner'},
-                {'Value': u'ardere-test', 'Key': 'ECSCluster'}
-            ]
-        )
+        ecs._ec2_client.run_instances.assert_called()
 
     def test_locate_metrics_container_ip(self):
         ecs = self._make_FUT()

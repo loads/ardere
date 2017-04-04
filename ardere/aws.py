@@ -28,6 +28,44 @@ with open(shell_path, 'r') as f:
 with open(telegraf_path, 'r') as f:
     telegraf_script = f.read()
 
+# EC2 userdata to setup values on load
+# Settings for net.ipv4 settings based on:
+#    http://stackoverflow.com/questions/410616/increasing-the-maximum-number-of-tcp-ip-connections-in-linux
+# Other settings are from operations on kernel tweaks they've done to handle
+# large socket conditions.
+EC2_USER_DATA = """#!/bin/bash
+echo ECS_CLUSTER='{ecs_name}' >> /etc/ecs/ecs.config
+sysctl net.core.rmem_default=8388608
+sysctl net.core.rmem_max=16777216
+sysctl net.core.wmem_max=16777216
+sysctl net.core.netdev_max_backlog=2500
+sysctl net.core.somaxconn=3240000
+sysctl net.netfilter.nf_conntrack_tcp_timeout_established=600
+sysctl net.nf_conntrack_max=1000000
+sysctl net.ipv4.ip_local_port_range="1024 65535"
+sysctl net.ipv4.netfilter.ip_conntrack_max=4999999
+sysctl net.ipv4.netfilter.ip_conntrack_tcp_timeout_time_wait=1
+sysctl net.ipv4.netfilter.ip_conntrack_tcp_timeout_established=54000
+sysctl net.ipv4.tcp_fin_timeout=5
+sysctl net.ipv4.tcp_keepalive_time=30
+sysctl net.ipv4.tcp_keepalive_intvl=15
+sysctl net.ipv4.tcp_keepalive_probes=6
+sysctl net.ipv4.tcp_window_scaling=1
+sysctl net.ipv4.tcp_rmem="4096 87380 16777216"
+sysctl net.ipv4.tcp_wmem="4096 65536 16777216"
+sysctl net.ipv4.tcp_mem="786432 1048576 26777216"
+sysctl net.ipv4.tcp_max_tw_buckets=360000
+sysctl net.ipv4.tcp_max_syn_backlog=3240000
+sysctl net.ipv4.tcp_max_tw_buckets=1440000
+sysctl net.ipv4.tcp_slow_start_after_idle=0
+sysctl net.ipv4.tcp_retries2=5
+sysctl net.ipv4.tcp_tw_recycle=1
+sysctl net.ipv4.tcp_tw_reuse=1
+sysctl vm.min_free_kbytes=65536
+sysctl -w fs.file-max=1000000
+ulimit -n 1000000
+"""
+
 
 # List tracking vcpu's of all instance types for cpu unit reservations
 # We are intentionally leaving out the following instance types as they're
@@ -166,30 +204,25 @@ class ECSManager(object):
         # type: (Dict[str, int]) -> None
         """Create requested types/quantities of instances for this cluster"""
         ami_id = self.ecs_ami_ids["us-east-1"]
-        request_instances = []
         for instance_type, instance_count in instances.items():
-            result = self._ec2_client.run_instances(
+            self._ec2_client.run_instances(
                 ImageId=ami_id,
-                KeyName="loads",
                 MinCount=instance_count,
                 MaxCount=instance_count,
                 InstanceType=instance_type,
-                UserData="#!/bin/bash \necho ECS_CLUSTER='" + self._ecs_name +
-                         "' >> /etc/ecs/ecs.config",
-                IamInstanceProfile={"Arn": self.ecs_profile}
+                UserData=EC2_USER_DATA.format(ecs_name=self._ecs_name),
+                IamInstanceProfile={"Arn": self.ecs_profile},
+                TagSpecifications=[
+                    {
+                        "ResourceType": "instance",
+                        "Tags": [
+                            dict(Key="Name", Value=self._ecs_name),
+                            dict(Key="Owner", Value="ardere"),
+                            dict(Key="ECSCluster", Value=self._ecs_name),
+                        ]
+                    }
+                ]
             )
-
-            # Track returned instances for tagging step
-            request_instances.extend([x["InstanceId"] for x in
-                                      result["Instances"]])
-
-        self._ec2_client.create_tags(
-            Resources=request_instances,
-            Tags=[
-                dict(Key="Owner", Value="ardere"),
-                dict(Key="ECSCluster", Value=self._ecs_name)
-            ]
-        )
 
     def locate_metrics_container_ip(self):
         """Locates the metrics container IP"""
@@ -319,8 +352,12 @@ class ECSManager(object):
 
             # using only memoryReservation sets no hard limit
             "memoryReservation": 256,
+            "privileged": True,
             "environment": env_vars,
             "entryPoint": cmd,
+            "ulimits": [
+                dict(name="nofile", softLimit=1000000, hardLimit=1000000)
+            ],
             "logConfiguration": {
                 "logDriver": "awslogs",
                 "options": {
@@ -352,6 +389,7 @@ class ECSManager(object):
             "portMappings": [
                 {"containerPort": 8125}
             ],
+            "privileged": True,
             "environment": [
                 {"name": "__ARDERE_TELEGRAF_CONF__",
                  "value": telegraf_script},

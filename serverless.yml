@@ -160,7 +160,7 @@ stepFunctions:
               ErrorEquals:
                 - NoSuchKey
               IntervalSeconds: 10
-              MaxAttempts: 4
+              MaxAttempts: 2
               BackoffRate: 1
           Catch:
             -
