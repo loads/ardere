@@ -65,17 +65,17 @@ class TestAsyncPlanRunner(unittest.TestCase):
     def test_ensure_metrics_available_running_create(self):
         from ardere.exceptions import ServicesStartingException
 
-        self.plan["influx_options"] = dict(enabled=True)
+        self.plan["metrics_options"] = dict(enabled=True)
         self.mock_ecs.locate_metrics_service.return_value = None
 
         assert_raises(ServicesStartingException,
                       self.runner.ensure_metrics_available)
-        self.mock_ecs.create_influxdb_service.assert_called()
+        self.mock_ecs.create_metrics_service.assert_called()
 
     def test_ensure_metrics_available_running_waiting(self):
         from ardere.exceptions import ServicesStartingException
 
-        self.plan["influx_options"] = dict(enabled=True)
+        self.plan["metrics_options"] = dict(enabled=True)
         self.mock_ecs.locate_metrics_service.return_value = {
             "deployments": [{
                 "desiredCount": 1,
@@ -87,7 +87,7 @@ class TestAsyncPlanRunner(unittest.TestCase):
                       self.runner.ensure_metrics_available)
 
     def test_ensure_metrics_available_running_error(self):
-        self.plan["influx_options"] = dict(enabled=True)
+        self.plan["metrics_options"] = dict(enabled=True)
         self.mock_ecs.locate_metrics_service.return_value = {
             "deployments": [{
                 "desiredCount": 1,
@@ -98,8 +98,15 @@ class TestAsyncPlanRunner(unittest.TestCase):
 
         assert_raises(Exception, self.runner.ensure_metrics_available)
 
-    def test_ensure_metrics_available_running(self):
-        self.plan["influx_options"] = dict(enabled=True)
+    @mock.patch("ardere.step_functions.requests")
+    def test_ensure_metrics_available_running(self, mock_requests):
+        os.environ["metrics_bucket"] = "metrics"
+        self.plan["metrics_options"] = dict(
+            enabled=True,
+            dashboard=dict(admin_user="admin",
+                           admin_password="admin", name="fred",
+                           filename="smith")
+        )
         self.mock_ecs.locate_metrics_service.return_value = {
             "deployments": [{
                 "desiredCount": 1,
@@ -107,13 +114,77 @@ class TestAsyncPlanRunner(unittest.TestCase):
             }]
         }
         self.mock_ecs.locate_metrics_container_ip.return_value = "1.1.1.1"
+        self.runner._create_dashboard = mock.Mock()
+
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_requests.get.return_value = mock_response
+
         self.runner.ensure_metrics_available()
         self.mock_ecs.locate_metrics_container_ip.assert_called()
         self.mock_influx.assert_called()
+        mock_requests.post.assert_called()
 
     def test_ensure_metrics_available_disabled(self):
-        self.plan["influx_options"] = dict(enabled=False)
+        self.plan["metrics_options"] = dict(enabled=False)
         self.runner.ensure_metrics_available()
+
+    @mock.patch("ardere.step_functions.requests")
+    def test_create_dashboard_success(self, mock_requests):
+        os.environ["metrics_bucket"] = "metrics"
+        mock_file = mock.Mock()
+        mock_file.get.return_value = {"Body": mock_file}
+        mock_file.read.return_value = "{}".encode(
+            'utf-8')
+        mock_s3_obj = mock.Mock()
+        mock_s3_obj.Object.return_value = mock_file
+        self.mock_boto.resource.return_value = mock_s3_obj
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"slug": "fred"}
+        mock_requests.post.return_value = mock_response
+
+        self.runner._create_dashboard("url")
+        mock_requests.post.assert_called()
+
+    @mock.patch("ardere.step_functions.requests")
+    def test_create_dashboard_failure(self, mock_requests):
+        os.environ["metrics_bucket"] = "metrics"
+        mock_file = mock.Mock()
+        mock_file.get.return_value = {"Body": mock_file}
+        mock_file.read.return_value = "{}".encode(
+            'utf-8')
+        mock_s3_obj = mock.Mock()
+        mock_s3_obj.Object.return_value = mock_file
+        self.mock_boto.resource.return_value = mock_s3_obj
+        mock_response = mock.Mock()
+        mock_response.status_code = 500
+        mock_requests.post.return_value = mock_response
+
+        assert_raises(Exception, self.runner._create_dashboard, "url")
+
+    @mock.patch("ardere.step_functions.requests")
+    def test_ensure_dashboard_success_existing_uri(self, mock_requests):
+        os.environ["metrics_bucket"] = "metrics"
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"title": "ap-loadtester", "uri": "db/fred-title"}
+        ]
+        self.mock_ecs.influx_db_name = "run"
+        mock_requests.get.return_value = mock_response
+        response = self.runner._ensure_dashboard("url")
+        eq_(response, "url/dashboard/db/fred-title?var-db=run")
+
+    @mock.patch("ardere.step_functions.requests")
+    def test_ensure_dashboard_failure(self, mock_requests):
+        os.environ["metrics_bucket"] = "metrics"
+        mock_response = mock.Mock()
+        mock_response.status_code = 500
+        mock_requests.post.return_value = mock_response
+
+        assert_raises(Exception, self.runner._ensure_dashboard, "url")
 
     def test_create_ecs_services(self):
         self.runner.create_ecs_services()

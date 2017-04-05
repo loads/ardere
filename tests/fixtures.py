@@ -3,6 +3,15 @@ sample_basic_test_plan = """
   "ecs_name": "ardere-test",
   "name": "Loadtest",
   "description": "Run all APLT scenarios",
+  "metrics_options": {
+    "enabled": true,
+    "dashboard": {
+        "admin_user": "admin",
+        "admin_password": "testing",
+        "name": "ap-loadtester",
+        "filename": "gf_basic_dashboard.json"
+    }
+  },
   "steps": [
     {
       "name": "TestCluster",
