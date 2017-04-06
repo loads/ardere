@@ -25,6 +25,14 @@ provider:
       Ref: "S3ReadyBucket"
     metrics_bucket:
       Ref: "MetricsBucket"
+    ec2_sg:
+      Fn::GetAtt:
+        - EC2SecurityGroup
+        - GroupId
+    metric_sg:
+      Fn::GetAtt:
+        - MetricSecurityGroup
+        - GroupId
     container_log_group:
       Ref: "ContainerLogs"
 
@@ -85,9 +93,10 @@ provider:
 functions:
   populate_missing_instances:
     handler: handler.populate_missing_instances
+    timeout: 300
   ensure_metrics_available:
     handler: handler.ensure_metrics_available
-    timeout: 120
+    timeout: 300
   create_ecs_services:
     handler: handler.create_ecs_services
   wait_for_cluster_ready:
@@ -199,6 +208,33 @@ resources:
       Type: "AWS::S3::Bucket"
       Properties:
         AccessControl: "AuthenticatedRead"
+    MetricSecurityGroup:
+      Type: "AWS::EC2::SecurityGroup"
+      Properties:
+        GroupDescription: "ardere metrics"
+        SecurityGroupIngress:
+          -
+            IpProtocol: tcp
+            FromPort: 3000
+            ToPort: 3000
+            CidrIp: 0.0.0.0/0
+          -
+            IpProtocol: tcp
+            FromPort: 8086
+            ToPort: 8086
+            CidrIp: 0.0.0.0/0
+          -
+            IpProtocol: udp
+            FromPort: 8125
+            ToPort: 8125
+            SourceSecurityGroupId:
+              Fn::GetAtt:
+                - EC2SecurityGroup
+                - GroupId
+    EC2SecurityGroup:
+      Type: "AWS::EC2::SecurityGroup"
+      Properties:
+        GroupDescription: "ardere load-testers"
     EC2ContainerRole:
       Type: "AWS::IAM::Role"
       Properties:

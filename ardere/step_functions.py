@@ -212,7 +212,22 @@ class AsynchronousPlanRunner(object):
 
         # Ensure we have the metrics instance
         if self.event["metrics_options"]["enabled"]:
-            needed[self.event["metrics_options"]["instance_type"]] += 1
+            # Query to see if we need to add a metrics node
+            metric_inst_type = self.event["metrics_options"]["instance_type"]
+
+            # We add the instance type to needed to ensure we don't leave out
+            # more nodes since this will turn up in the query_active results
+            needed[metric_inst_type] += 1
+
+            # We create it here up-front if needed since we have different
+            # tags
+            if not self.ecs.has_metrics_node(metric_inst_type):
+                self.ecs.request_instances(
+                    instances={metric_inst_type: 1},
+                    security_group_ids=[os.environ["metric_sg"],
+                                        os.environ["ec2_sg"]],
+                    additional_tags={"Role": "metrics"}
+                )
 
         logger.info("Plan instances needed: {}".format(needed))
         current_instances = self.ecs.query_active_instances()
@@ -221,7 +236,10 @@ class AsynchronousPlanRunner(object):
         )
         if missing_instances:
             logger.info("Requesting instances: {}".format(missing_instances))
-            self.ecs.request_instances(missing_instances)
+            self.ecs.request_instances(
+                instances=missing_instances,
+                security_group_ids=[os.environ["ec2_sg"]]
+            )
         return self.event
 
     def ensure_metrics_available(self):

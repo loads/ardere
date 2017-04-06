@@ -68,6 +68,28 @@ class TestECSManager(unittest.TestCase):
         )
         eq_(result, {"t2.medium": 1})
 
+    def test_has_metrics_node(self):
+        mock_paginator = mock.Mock()
+        mock_paginator.paginate.return_value = [
+            {"Reservations": [
+                {
+                    "Instances": [
+                        {
+                            "State": {
+                                "Code": 16
+                            },
+                            "InstanceType": "t2.medium"
+                        }
+                    ]
+                }
+            ]}
+        ]
+
+        ecs = self._make_FUT()
+        ecs._ec2_client.get_paginator.return_value = mock_paginator
+        resp = ecs.has_metrics_node("t2.medium")
+        eq_(resp, True)
+
     def test_request_instances(self):
         instances = {
             "t2.medium": 10
@@ -76,7 +98,7 @@ class TestECSManager(unittest.TestCase):
         ecs._ec2_client.run_instances.return_value = {
             "Instances": [{"InstanceId": 12345}]
         }
-        ecs.request_instances(instances)
+        ecs.request_instances(instances, ["i-382842"], {"Role": "metrics"})
         ecs._ec2_client.run_instances.assert_called()
 
     def test_locate_metrics_container_ip(self):
