@@ -62,6 +62,12 @@ provider:
          - Fn::Join: ['', ['arn:aws:s3:::', Ref: "S3ReadyBucket", "/*"]]
     -  Effect: "Allow"
        Action:
+         - "s3:ListBucket"
+         - "s3:GetObject"
+       Resource:
+         - Fn::Join: ['', ['arn:aws:s3:::', Ref: "MetricsBucket", "/*"]]
+    -  Effect: "Allow"
+       Action:
          - "ec2:DescribeInstances"
          - "ec2:RunInstances"
          - "ec2:CreateTags"
@@ -81,6 +87,7 @@ functions:
     handler: handler.populate_missing_instances
   ensure_metrics_available:
     handler: handler.ensure_metrics_available
+    timeout: 120
   create_ecs_services:
     handler: handler.create_ecs_services
   wait_for_cluster_ready:
@@ -113,6 +120,11 @@ stepFunctions:
               IntervalSeconds: 10
               MaxAttempts: 60
               BackoffRate: 1
+            -
+              ErrorEquals:
+                - States.ALL
+              ResultPath: "$.error-info"
+              Next: "Clean-up Cluster"
           Next: "Create ECS Services"
         "Create ECS Services":
           Type: Task

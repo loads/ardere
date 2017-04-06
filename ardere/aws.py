@@ -13,20 +13,13 @@ from typing import Any, Dict, List  # noqa
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Shell script to load
+# Setup script paths
 dir_path = os.path.dirname(os.path.realpath(__file__))
 parent_dir_path = os.path.dirname(dir_path)
-shell_path = os.path.join(parent_dir_path, "src", "shell",
-                          "waitforcluster.sh")
-telegraf_path = os.path.join(parent_dir_path, "src", "shell",
-                            "telegraf.toml")
-
-# Load the shell scripts
-with open(shell_path, 'r') as f:
-    shell_script = f.read()
-
-with open(telegraf_path, 'r') as f:
-    telegraf_script = f.read()
+wait_script_path = os.path.join(parent_dir_path, "src", "shell",
+                                "waitforcluster.sh")
+telegraf_script_path = os.path.join(parent_dir_path, "src", "shell",
+                                    "telegraf.toml")
 
 # EC2 userdata to setup values on load
 # Settings for net.ipv4 settings based on:
@@ -65,7 +58,6 @@ sysctl vm.min_free_kbytes=65536
 sysctl -w fs.file-max=1000000
 ulimit -n 1000000
 """
-
 
 # List tracking vcpu's of all instance types for cpu unit reservations
 # We are intentionally leaving out the following instance types as they're
@@ -120,8 +112,12 @@ class ECSManager(object):
         "us-west-2": "ami-62d35c02"
     }
 
-    influxdb_container = "influxdb:1.1-alpine"
+    influxdb_container = "influxdb:1.2-alpine"
     telegraf_container = "telegraf:1.2-alpine"
+    grafana_container = "grafana/grafana:4.1.2"
+
+    _wait_script = None
+    _telegraf_script = None
 
     def __init__(self, plan):
         # type: (Dict[str, Any]) -> None
@@ -142,6 +138,20 @@ class ECSManager(object):
         self._plan_uuid = plan["plan_run_uuid"]
 
     @property
+    def wait_script(self):
+        if not self._wait_script:
+            with open(wait_script_path, 'r') as f:
+                self._wait_script = f.read()
+        return self._wait_script
+
+    @property
+    def telegraf_script(self):
+        if not self._telegraf_script:
+            with open(telegraf_script_path, 'r') as f:
+                self._telegraf_script = f.read()
+        return self._telegraf_script
+
+    @property
     def plan_uuid(self):
         return self._plan_uuid
 
@@ -155,6 +165,14 @@ class ECSManager(object):
     @property
     def influx_db_name(self):
         return "run-{}".format(self.plan_uuid)
+
+    @property
+    def grafana_admin_user(self):
+        return self._plan["metrics_options"]["dashboard"]["admin_user"]
+
+    @property
+    def grafana_admin_password(self):
+        return self._plan["metrics_options"]["dashboard"]["admin_password"]
 
     def family_name(self, step):
         """Generate a consistent family name for a given step"""
@@ -255,25 +273,67 @@ class ECSManager(object):
         else:
             return None
 
-    def create_influxdb_service(self, options):
+    def create_metrics_service(self, options):
         # type: (Dict[str, Any]) -> Dict[str, Any]
-        """Creates an ECS service to run InfluxDB for metric reporting and
-        returns its info"""
+        """Creates an ECS service to run InfluxDB and Grafana for metric
+        reporting and returns its info"""
         logger.info("Creating InfluxDB service with options: {}".format(
             options))
+
+        cmd = """\
+        export GF_DEFAULT_INSTANCE_NAME=`wget -qO- http://169.254.169.254/latest/meta-data/instance-id` && \
+        export GF_SECURITY_ADMIN_USER="%s" && \
+        export GF_SECURITY_ADMIN_PASSWORD="%s" && \
+        export GF_USERS_ALLOW_SIGN_UP="false" && \
+        mkdir "${GF_DASHBOARDS_JSON_PATH}" && \
+        ./run.sh
+        """ % (self.grafana_admin_user, self.grafana_admin_password)  # noqa
+        cmd = ['sh', '-c', '{}'.format(cmd)]
+
+        gf_env = {
+            "GF_DASHBOARDS_JSON_ENABLED": "true",
+            "GF_DASHBOARDS_JSON_PATH": "/var/lib/grafana/dashboards",
+            "__ARDERE_GRAFANA_URL__":
+                "http://admin:admin@localhost:3000/api/datasources"
+        }
 
         task_response = self._ecs_client.register_task_definition(
             family=self.metrics_family_name(),
             containerDefinitions=[
                 {
-                    "name": "metrics",
+                    "name": "influxdb",
                     "image": self.influxdb_container,
                     "cpu": cpu_units_for_instance_type(
                         options["instance_type"]),
                     "memoryReservation": 256,
+                    "privileged": True,
                     "portMappings": [
                         {"containerPort": 8086},
                         {"containerPort": 8088}
+                    ],
+                    "logConfiguration": {
+                        "logDriver": "awslogs",
+                        "options": {
+                            "awslogs-group": self.container_log_group,
+                            "awslogs-region": "us-east-1",
+                            "awslogs-stream-prefix":
+                                "ardere-{}".format(self.plan_uuid)
+                        }
+                    }
+                },
+                {
+                    "name": "grafana",
+                    "image": self.grafana_container,
+                    "cpu": 512,
+                    "memoryReservation": 256,
+                    "entryPoint": cmd,
+                    "portMappings": [
+                        {"containerPort": 3000}
+                    ],
+                    "privileged": True,
+                    "environment": [
+                        {"name": key, "value": value} for key, value in
+                        gf_env.items()
                     ],
                     "logConfiguration": {
                         "logDriver": "awslogs",
@@ -333,7 +393,7 @@ class ECSManager(object):
         cmd = ['sh', '-c', '{} && {}'.format(wfc_cmd, service_cmd)]
 
         # Prep the env vars
-        env_vars = [{"name": wfc_var, "value": shell_script}]
+        env_vars = [{"name": wfc_var, "value": self.wait_script}]
         for name, value in step.get("env", {}).items():
             env_vars.append({"name": name, "value": value})
 
@@ -341,8 +401,10 @@ class ECSManager(object):
         family_name = step["name"] + "-" + self._plan_uuid
 
         # Use cpu_unit if provided, otherwise monopolize
-        cpu_units = step.get("cpu_units",
-                             cpu_units_for_instance_type(step["instance_type"]))
+        cpu_units = step.get(
+            "cpu_units",
+            cpu_units_for_instance_type(step["instance_type"])
+        )
 
         # Setup the container definition
         container_def = {
@@ -378,7 +440,7 @@ class ECSManager(object):
         echo "${__ARDERE_TELEGRAF_CONF__}" > /etc/telegraf/telegraf.conf && \
         export __ARDERE_TELEGRAF_HOST__=`wget -qO- http://169.254.169.254/latest/meta-data/instance-id` && \
         telegraf \
-        """
+        """  # noqa
         cmd = ['sh', '-c', '{}'.format(cmd)]
         telegraf_def = {
             "name": "telegraf",
@@ -392,7 +454,7 @@ class ECSManager(object):
             "privileged": True,
             "environment": [
                 {"name": "__ARDERE_TELEGRAF_CONF__",
-                 "value": telegraf_script},
+                 "value": self.telegraf_script},
                 {"name": "__ARDERE_TELEGRAF_STEP__",
                  "value": step["name"]},
                 {"name": "__ARDERE_INFLUX_ADDR__",
@@ -457,8 +519,7 @@ class ECSManager(object):
         # type: (List[Dict[str, Any]]) -> None
         """Create ECS Services given a list of steps"""
         with ThreadPoolExecutor(max_workers=8) as executer:
-            results = executer.map(self.create_service, steps)
-        return list(results)
+            executer.map(self.create_service, steps)
 
     def service_ready(self, step):
         # type: (Dict[str, Any]) -> bool
@@ -525,7 +586,7 @@ class ECSManager(object):
         # Avoid shutting down metrics if tear down was not requested
         # We have to exclude it from the services discovered above if we
         # should NOT tear it down
-        if not self._plan["influx_options"]["tear_down"]:
+        if not self._plan["metrics_options"]["tear_down"]:
             metric_service = self.locate_metrics_service()
             if metric_service and metric_service["serviceArn"] in service_arns:
                 service_arns.remove(metric_service["serviceArn"])
@@ -552,7 +613,7 @@ class ECSManager(object):
         step_family_names = [self.family_name(step) for step in steps]
 
         # Add in the metrics family name if we need to tear_down
-        if self._plan["influx_options"]["tear_down"]:
+        if self._plan["metrics_options"]["tear_down"]:
             step_family_names.append(self.metrics_family_name())
 
         for family_name in step_family_names:

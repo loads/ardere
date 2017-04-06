@@ -1,10 +1,12 @@
-import os
+import json
 import logging
+import os
 import time
 from collections import defaultdict
 
 import boto3
 import botocore
+import requests
 import toml
 from influxdb import InfluxDBClient
 from marshmallow import (
@@ -46,19 +48,27 @@ class StepValidator(Schema):
     docker_series = fields.String(missing="default")
 
 
-class InfluxOptions(Schema):
+class DashboardOptions(Schema):
+    admin_user = fields.String(missing="admin")
+    admin_password = fields.String(required=True)
+    name = fields.String(required=True)
+    filename = fields.String(required=True)
+
+
+class MetricsOptions(Schema):
     enabled = fields.Bool(missing=True)
     instance_type = fields.String(
         missing="c4.large",
         validate=validate.OneOf(ec2_vcpu_by_type.keys())
     )
+    dashboard = fields.Nested(DashboardOptions)
     tear_down = fields.Bool(missing=False)
 
 
 class PlanValidator(Schema):
     ecs_name = fields.String(required=True)
     name = fields.String(required=True)
-    influx_options = fields.Nested(InfluxOptions, missing={})
+    metrics_options = fields.Nested(MetricsOptions, missing={})
 
     steps = fields.Nested(StepValidator, many=True)
 
@@ -95,6 +105,15 @@ class AsynchronousPlanRunner(object):
         self.context = context
         self.ecs = ECSManager(plan=event)
 
+    @property
+    def grafana_auth(self):
+        dash_opts = self.event["metrics_options"]["dashboard"]
+        return dash_opts["admin_user"], dash_opts["admin_password"]
+
+    @property
+    def dashboard_options(self):
+        return self.event["metrics_options"]["dashboard"]
+
     def _build_instance_map(self):
         """Given a JSON test-plan, build and return a dict of instance types
         and how many should exist for each type."""
@@ -127,6 +146,58 @@ class AsynchronousPlanRunner(object):
         # Replace our event with the validated
         self.event = data
 
+    def _create_dashboard(self, grafana_url):
+        # type: (str, Dict[str, any]) -> str
+        """Create the dashboard in grafana"""
+        s3_filename = self.dashboard_options["filename"]
+        s3 = self.boto.resource('s3')
+        dash_file = s3.Object(
+            os.environ["metrics_bucket"],
+            s3_filename
+        )
+        file_contents = dash_file.get()['Body'].read().decode('utf-8')
+        dash_contents = json.loads(file_contents)
+        dash_contents["title"] = self.dashboard_options["name"]
+        dash_contents["id"] = None
+
+        response = requests.post(grafana_url+"/api/dashboards/db",
+                                 auth=self.grafana_auth,
+                                 json=dict(
+                                     dashboard=dash_contents,
+                                     overwrite=True
+                                 ))
+        if response.status_code != 200:
+            raise Exception("Error creating dashboard: {}".format(
+                response.status_code))
+
+        return "db/{}".format(response.json()["slug"])
+
+    def _ensure_dashboard(self, grafana_url):
+        # type: (str, Dict[str, Any]) -> str
+        """Ensure the dashboard is present"""
+        dash_name = self.dashboard_options["name"]
+
+        # Verify whether the dashboard exists
+        response = requests.get(grafana_url+"/api/search",
+                                auth=self.grafana_auth,
+                                params=dict(query=dash_name))
+        if response.status_code != 200:
+            raise Exception("Failure to search dashboards")
+
+        # search results for dashboard
+        results = filter(lambda x: x["title"] == dash_name, response.json())
+        if not results:
+            dash_uri = self._create_dashboard(grafana_url)
+        else:
+            dash_uri = results[0]["uri"]
+
+        # Return the nice dashboard URL
+        return "{grafana}/dashboard/{dash_uri}?var-db={db_name}".format(
+            grafana=grafana_url,
+            dash_uri=dash_uri,
+            db_name=self.ecs.influx_db_name
+        )
+
     def populate_missing_instances(self):
         """Populate any missing EC2 instances needed for the test plan in the
         cluster
@@ -140,8 +211,8 @@ class AsynchronousPlanRunner(object):
         needed = self._build_instance_map()
 
         # Ensure we have the metrics instance
-        if self.event["influx_options"]["enabled"]:
-            needed[self.event["influx_options"]["instance_type"]] += 1
+        if self.event["metrics_options"]["enabled"]:
+            needed[self.event["metrics_options"]["instance_type"]] += 1
 
         logger.info("Plan instances needed: {}".format(needed))
         current_instances = self.ecs.query_active_instances()
@@ -159,7 +230,7 @@ class AsynchronousPlanRunner(object):
         Step 2
 
         """
-        if not self.event["influx_options"]["enabled"]:
+        if not self.event["metrics_options"]["enabled"]:
             return self.event
 
         # Is the service already running?
@@ -168,7 +239,7 @@ class AsynchronousPlanRunner(object):
 
         if not metrics:
             # Start the metrics service, throw a retry
-            self.ecs.create_influxdb_service(self.event["influx_options"])
+            self.ecs.create_metrics_service(self.event["metrics_options"])
             raise ServicesStartingException("Triggered metrics start")
 
         deploy = metrics["deployments"][0]
@@ -187,7 +258,26 @@ class AsynchronousPlanRunner(object):
         # Create an influxdb for this run
         influx_client = InfluxDBClient(host=metric_ip)
         influx_client.create_database(self.ecs.influx_db_name)
+
+        # Setup the grafana datasource
+        grafana_url = "http://{}:3000".format(metric_ip)
+        ds_api_url = "{}/api/datasources".format(grafana_url)
+        requests.post(ds_api_url, auth=self.grafana_auth, json=dict(
+            name=self.ecs.influx_db_name,
+            type="influxdb",
+            url="http://localhost:8086",
+            database=self.ecs.influx_db_name,
+            access="proxy",
+            basicAuth=False
+        ))
+
+        # Setup the grafana dashboard if needed/desired
+        if self.event["metrics_options"].get("dashboard"):
+            dash_url = self._ensure_dashboard(grafana_url)
+            self.event["grafana_dashboard_url"] = dash_url
+
         self.event["influxdb_public_ip"] = metric_ip
+        self.event["grafana_dashboard"] = grafana_url
         return self.event
 
     def create_ecs_services(self):

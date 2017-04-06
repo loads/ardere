@@ -19,7 +19,11 @@ class TestECSManager(unittest.TestCase):
         ECSManager.boto = self.boto_mock
         if not plan:
             plan = json.loads(fixtures.sample_basic_test_plan)
-            plan["influx_options"] = dict(
+            plan["metrics_options"] = dict(
+                dashboard=dict(
+                    admin_user="admin",
+                    admin_password="admin"
+                ),
                 tear_down=False
             )
         return ECSManager(plan)
@@ -116,7 +120,7 @@ class TestECSManager(unittest.TestCase):
         result = ecs.locate_metrics_service()
         eq_(result, None)
 
-    def test_create_influxdb_service(self):
+    def test_create_metrics_service(self):
         ecs = self._make_FUT()
 
         # Setup mocks
@@ -129,7 +133,7 @@ class TestECSManager(unittest.TestCase):
             "service": {"serviceArn": "arn:of:some:service::"}
         }
 
-        result = ecs.create_influxdb_service(dict(instance_type="c4.large"))
+        result = ecs.create_metrics_service(dict(instance_type="c4.large"))
         eq_(result["service_arn"], "arn:of:some:service::")
 
     def test_create_service(self):
@@ -343,7 +347,7 @@ class TestECSManager(unittest.TestCase):
         ecs.locate_metrics_service.return_value = dict(
             serviceArn="arn:456:::"
         )
-        ecs._plan["influx_options"]["tear_down"] = True
+        ecs._plan["metrics_options"]["tear_down"] = True
         ecs._ecs_client.get_paginator.return_value = mock_paginator
         ecs._ecs_client.describe_task_definition.return_value = {
             "taskDefinition": {"taskDefinitionArn": "arn:task:::"}
