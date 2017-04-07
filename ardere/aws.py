@@ -8,7 +8,7 @@ from collections import defaultdict
 import boto3
 import botocore
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List  # noqa
+from typing import Any, Dict, List, Optional  # noqa
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -181,21 +181,20 @@ class ECSManager(object):
     def metrics_family_name(self):
         return "{}-metrics".format(self._ecs_name)
 
-    def query_active_instances(self):
-        # type: () -> Dict[str, int]
+    def query_active_instances(self, additional_tags=None):
+        # type: (Optional[Dict[str, str]]) -> Dict[str, int]
         """Query EC2 for all the instances owned by ardere for this cluster."""
         instance_dict = defaultdict(int)
         paginator = self._ec2_client.get_paginator('describe_instances')
+        filters = {"Owner": "ardere", "ECSCluster": self._ecs_name}
+        if additional_tags:
+            filters.update(additional_tags)
         response_iterator = paginator.paginate(
             Filters=[
                 {
-                    "Name": "tag:Owner",
-                    "Values": ["ardere"]
-                },
-                {
-                    "Name": "tag:ECSCluster",
-                    "Values": [self._ecs_name]
-                }
+                    "Name": "tag:{}".format(tag_name),
+                    "Values": [tag_value]
+                } for tag_name, tag_value in filters.items()
             ]
         )
         for page in response_iterator:
@@ -218,10 +217,23 @@ class ECSManager(object):
                 needed[instance_type] = instance_count - cur
         return needed
 
-    def request_instances(self, instances):
-        # type: (Dict[str, int]) -> None
+    def has_metrics_node(self, instance_type):
+        # type: (str) -> bool
+        """Return whether a metrics node with this instance type exists"""
+        instances = self.query_active_instances(
+            additional_tags=dict(Role="metrics")
+        )
+        return instance_type in instances
+
+    def request_instances(self, instances, security_group_ids,
+                          additional_tags=None):
+        # type: (Dict[str, int], List[str], Optional[Dict[str, str]]) -> None
         """Create requested types/quantities of instances for this cluster"""
         ami_id = self.ecs_ami_ids["us-east-1"]
+        tags = dict(Name=self._ecs_name, Owner="ardere",
+                    ECSCluster=self._ecs_name)
+        if additional_tags:
+            tags.update(additional_tags)
         for instance_type, instance_count in instances.items():
             self._ec2_client.run_instances(
                 ImageId=ami_id,
@@ -230,13 +242,13 @@ class ECSManager(object):
                 InstanceType=instance_type,
                 UserData=EC2_USER_DATA.format(ecs_name=self._ecs_name),
                 IamInstanceProfile={"Arn": self.ecs_profile},
+                SecurityGroupIds=security_group_ids,
                 TagSpecifications=[
                     {
                         "ResourceType": "instance",
                         "Tags": [
-                            dict(Key="Name", Value=self._ecs_name),
-                            dict(Key="Owner", Value="ardere"),
-                            dict(Key="ECSCluster", Value=self._ecs_name),
+                            dict(Key=tag_name, Value=tag_value)
+                            for tag_name, tag_value in tags.items()
                         ]
                     }
                 ]
@@ -282,9 +294,9 @@ class ECSManager(object):
 
         cmd = """\
         export GF_DEFAULT_INSTANCE_NAME=`wget -qO- http://169.254.169.254/latest/meta-data/instance-id` && \
-        export GF_SECURITY_ADMIN_USER="%s" && \
-        export GF_SECURITY_ADMIN_PASSWORD="%s" && \
-        export GF_USERS_ALLOW_SIGN_UP="false" && \
+        export GF_SECURITY_ADMIN_USER=%s && \
+        export GF_SECURITY_ADMIN_PASSWORD=%s && \
+        export GF_USERS_ALLOW_SIGN_UP=false && \
         mkdir "${GF_DASHBOARDS_JSON_PATH}" && \
         ./run.sh
         """ % (self.grafana_admin_user, self.grafana_admin_password)  # noqa

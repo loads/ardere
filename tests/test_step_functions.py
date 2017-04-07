@@ -50,6 +50,9 @@ class TestAsyncPlanRunner(unittest.TestCase):
         eq_(self.runner.event["ecs_name"], "ardere-test")
 
     def test_populate_missing_instances(self):
+        os.environ["ec2_sg"] = "i-23232"
+        os.environ["metric_sg"] = "i-84828"
+        self.mock_ecs.has_metrics_node.return_value = False
         self.runner.populate_missing_instances()
         self.mock_ecs.query_active_instances.assert_called()
         self.mock_ecs.request_instances.assert_called()
