@@ -273,6 +273,45 @@ class TestAsyncPlanRunner(unittest.TestCase):
         self.runner.cleanup_cluster()
         mock_s3.Object.assert_called()
 
+    def test_drain_check_active(self):
+        from ardere.exceptions import UndrainedInstancesException
+
+        mock_client = mock.Mock()
+        mock_client.list_container_instances.return_value = {
+            'containerInstanceArns': [
+                'Some-Arn-01234567890',
+            ],
+            "nextToken": "token-8675309"
+        }
+        self.mock_boto.client.return_value = mock_client
+        assert_raises(UndrainedInstancesException,
+                      self.runner.check_drained)
+
+    def test_drain_check_draining(self):
+        from ardere.exceptions import UndrainedInstancesException
+
+        mock_client = mock.Mock()
+        mock_client.list_container_instances.side_effect = [
+            {},
+            {
+                'containerInstanceArns': [
+                    'Some-Arn-01234567890',
+                ],
+                "nextToken": "token-8675309"
+            }
+        ]
+        self.mock_boto.client.return_value = mock_client
+        assert_raises(UndrainedInstancesException,
+                      self.runner.check_drained)
+
+    def test_drain_check(self):
+        mock_client = mock.Mock()
+        mock_client.list_container_instances.side_effect = [
+            {},
+            {}
+        ]
+        self.mock_boto.client.return_value = mock_client
+        self.runner.check_drained()
 
 class TestValidation(unittest.TestCase):
     def _make_FUT(self):

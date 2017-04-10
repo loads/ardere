@@ -112,6 +112,8 @@ functions:
     handler: handler.check_for_cluster_done
   cleanup_cluster:
     handler: handler.cleanup_cluster
+  check_drain:
+    handler: handler.check_drain
 
 stepFunctions:
   stateMachines:
@@ -134,6 +136,7 @@ stepFunctions:
               IntervalSeconds: 10
               MaxAttempts: 60
               BackoffRate: 1
+          Catch:
             -
               ErrorEquals:
                 - States.ALL
@@ -201,6 +204,17 @@ stepFunctions:
         "Clean-up Cluster":
           Type: Task
           Resource: cleanup_cluster
+          Next: "Checking Drain"
+        "Checking Drain":
+          Type: Task
+          Resource: check_drain
+          Retry:
+            -
+              ErrorEquals:
+                - UndrainedInstancesException
+              IntervalSeconds: 10
+              MaxAttempts: 10
+              BackoffRate: 1
           End: true
 
 resources:

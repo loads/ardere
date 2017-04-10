@@ -27,6 +27,7 @@ from ardere.exceptions import (
     ServicesStartingException,
     ShutdownPlanException,
     ValidationException,
+    UndrainedInstancesException,
 )
 
 logger = logging.getLogger()
@@ -417,4 +418,31 @@ class AsynchronousPlanRunner(object):
             ready_file.delete()
         except botocore.exceptions.ClientError:
             pass
+        return self.event
+
+    def check_drained(self):
+        """Ensure that all services are shut down before allowing restart
+
+        Step 8
+
+        """
+        client = self.boto.client('ecs')
+        actives = len(
+            client.list_container_instances(
+                cluster=self.event["ecs_name"],
+                maxResults=1,
+                status="ACTIVE",
+            ).get('containerInstanceArns', []))
+        if actives:
+            raise UndrainedInstancesException(
+                "Still {} active.".format(actives))
+        draining = len(
+            client.list_container_instances(
+                cluster=self.event["ecs_name"],
+                maxResults=1,
+                status="DRAINING",
+            ).get('containerInstanceArns', []))
+        if draining:
+            raise UndrainedInstancesException(
+                "Still {} draining.".format(draining))
         return self.event

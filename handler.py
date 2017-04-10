@@ -39,3 +39,7 @@ def check_for_cluster_done(event, context):
 def cleanup_cluster(event, context):
     runner = AsynchronousPlanRunner(event, context)
     return runner.cleanup_cluster()
+
+
+def check_drain(event, context):
+    return AsynchronousPlanRunner(event, context).check_drained()

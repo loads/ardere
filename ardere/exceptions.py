@@ -8,3 +8,7 @@ class ShutdownPlanException(Exception):
 
 class ValidationException(Exception):
     """Exception to indicate validation error parsing input"""
+
+
+class UndrainedInstancesException(Exception):
+    """There are still ACTIVE or DRAINING instances in the cluster"""
