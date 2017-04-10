@@ -9,6 +9,11 @@ package:
     - node_modules/**
     - ardenv/**
     - tests/**
+    - lib/**
+    - share/**
+    - man/**
+    - bin/**
+    - serverless/**
   include:
     - ardere/**
 

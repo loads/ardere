@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import time
 from collections import defaultdict
 
@@ -31,6 +32,15 @@ from ardere.exceptions import (
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Step name is used as the Log stream name.
+# Log stream names are limited to 512 characters (no ":" or "*")
+# Name format is
+# ardere-UUID/STEP_NAME/LUUID
+# where UUID is dashed, and LUUID is not
+# therefore: 512 - (9 + 36 + 32) = max name len
+MAX_NAME_LEN = 435
+INVALID_NAME_CHECK = re.compile("([:\*]+)")
+
 
 class StepValidator(Schema):
     name = fields.String(required=True)
@@ -46,6 +56,15 @@ class StepValidator(Schema):
     port_mapping = fields.List(fields.Int())
     env = fields.Dict()
     docker_series = fields.String(missing="default")
+
+    @decorators.validates("name")
+    def validate_name(self, value):
+        if len(value) == 0:
+            raise ValidationError("Step name missing")
+        if len(value) > MAX_NAME_LEN:
+            raise ValidationError("Step name too long")
+        if INVALID_NAME_CHECK.search(value):
+            raise ValidationError("Step name contains invalid characters")
 
 
 class DashboardOptions(Schema):
@@ -72,15 +91,29 @@ class PlanValidator(Schema):
 
     steps = fields.Nested(StepValidator, many=True)
 
+    def _log_validate_name(self, value, name_type):
+        if len(value) == 0:
+            raise ValidationError("{} missing".format(name_type))
+        if len(value) > MAX_NAME_LEN:
+            raise ValidationError("{} too long".format(name_type))
+        if INVALID_NAME_CHECK.search(value):
+            raise ValidationError(
+                "{} contained invalid characters".format(name_type))
+
     @decorators.validates("ecs_name")
     def validate_ecs_name(self, value):
         """Verify a cluster exists for this name"""
+        self._log_validate_name(value, "Plan ecs_name")
         client = self.context["boto"].client('ecs')
         response = client.describe_clusters(
             clusters=[value]
         )
         if not response.get("clusters"):
             raise ValidationError("No cluster with the provided name.")
+
+    @decorators.validates("name")
+    def validate_name(self, value):
+        self._log_validate_name(value, "Step name")
 
 
 class AsynchronousPlanRunner(object):

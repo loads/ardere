@@ -287,6 +287,36 @@ class TestValidation(unittest.TestCase):
         eq_(errors, {})
         eq_(len(data["steps"]), len(plan["steps"]))
 
+    def test_validate_fail_ecs_name(self):
+        schema = self._make_FUT()
+        schema.context["boto"] = mock.Mock()
+        plan = json.loads(fixtures.sample_basic_test_plan)
+        plan['ecs_name'] = ''
+        data, errors = schema.load(plan)
+        eq_(errors, {'ecs_name': ['Plan ecs_name missing']})
+        plan['ecs_name'] += '*'
+        data, errors = schema.load(plan)
+        eq_(errors, {'ecs_name':
+                     ['Plan ecs_name contained invalid characters']})
+        plan['ecs_name'] = 'a' * 512
+        data, errors = schema.load(plan)
+        eq_(errors, {'ecs_name': ['Plan ecs_name too long']})
+
+    def test_validate_fail_step_name(self):
+        schema = self._make_FUT()
+        schema.context["boto"] = mock.Mock()
+        plan = json.loads(fixtures.sample_basic_test_plan)
+        plan['steps'][0]['name'] = ''
+        data, errors = schema.load(plan)
+        eq_(errors, {'steps': {0: {'name': ['Step name missing']}}})
+        plan['steps'][0]['name'] = '*'
+        data, errors = schema.load(plan)
+        eq_(errors, {'steps': {0: {'name':
+                    ['Step name contains invalid characters']}}})
+        plan['steps'][0]['name'] = 'a' * 512
+        data, errors = schema.load(plan)
+        eq_(errors, {'steps': {0: {'name': ['Step name too long']}}})
+
     def test_validate_fail(self):
         schema = self._make_FUT()
         schema.context["boto"] = mock_boto = mock.Mock()
