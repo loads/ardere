@@ -12,3 +12,7 @@ class ValidationException(Exception):
 
 class UndrainedInstancesException(Exception):
     """There are still ACTIVE or DRAINING instances in the cluster"""
+
+
+class CreatingMetricSourceException(Exception):
+    """Metric creation task hasn't completed yet"""

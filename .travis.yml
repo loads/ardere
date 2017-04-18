@@ -6,14 +6,15 @@ dist: precise
 matrix:
   include:
     - python: 2.7
+      env: CODECOV=true
 
 install:
 - pip install -r test-requirements.txt
 - pip install ${CODECOV:+codecov}
 script:
-- nosetests -d tests -- ${CODECOV:+--with-coverage --cover-xml --cover-package=ardere}
+- nosetests -d tests ${CODECOV:+--with-coverage --cover-xml --cover-package=ardere}
 after_success:
-- ${CODECOV:+codecov}
+- codecov
 notifications:
   slack:
     secure: vT9sWtUuxk28g6xYKAsQmiPZllErOYVfx5lcL+/jo1eRFrmbpYnyndT6s+FxGI1547oizZ0IqZbHVvB7BUoSJixXJyQJYXW2MchwN1UeHrey8mYpF1GNEaJT7FMfqSkxUU9gvAZ3IU7zstNeTLbfG1GkLuzybp0WAiHl/ocUTz8=

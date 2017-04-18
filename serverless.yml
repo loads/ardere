@@ -47,13 +47,16 @@ provider:
          - "ecs:CreateCluster"
          - "ecs:ListServices"
          - "ecs:ListContainerInstances"
+         - "ecs:ListTasks"
          - "ecs:DescribeClusters"
          - "ecs:DescribeServices"
          - "ecs:DescribeTaskDefinition"
+         - "ecs:DescribeTasks"
          - "ecs:DescribeContainerInstances"
          - "ecs:CreateService"
          - "ecs:DeleteService"
          - "ecs:UpdateService"
+         - "ecs:StartTask"
          - "ecs:RegisterTaskDefinition"
          - "ecs:DeregisterTaskDefinition"
        Resource:
@@ -102,6 +105,9 @@ functions:
   ensure_metrics_available:
     handler: handler.ensure_metrics_available
     timeout: 300
+  ensure_metric_sources_created:
+    handler: handler.ensure_metric_sources_created
+    timeout: 300
   create_ecs_services:
     handler: handler.create_ecs_services
   wait_for_cluster_ready:
@@ -135,6 +141,23 @@ stepFunctions:
                 - ServicesStartingException
               IntervalSeconds: 10
               MaxAttempts: 60
+              BackoffRate: 1
+          Catch:
+            -
+              ErrorEquals:
+                - States.ALL
+              ResultPath: "$.error-info"
+              Next: "Clean-up Cluster"
+          Next: "Ensure Metric Sources Created"
+        "Ensure Metric Sources Created":
+          Type: Task
+          Resource: ensure_metric_sources_created
+          Retry:
+            -
+              ErrorEquals:
+                - CreatingMetricSourceException
+              IntervalSeconds: 5
+              MaxAttempts: 20
               BackoffRate: 1
           Catch:
             -
@@ -236,20 +259,22 @@ resources:
             IpProtocol: tcp
             FromPort: 3000
             ToPort: 3000
-            CidrIp: 0.0.0.0/0
+            SourceSecurityGroupId:
+              Fn::GetAtt:
+                - GrafanaSecurityGroup
+                - GroupId
           -
             IpProtocol: tcp
             FromPort: 8086
             ToPort: 8086
-            CidrIp: 0.0.0.0/0
-          -
-            IpProtocol: udp
-            FromPort: 8125
-            ToPort: 8125
             SourceSecurityGroupId:
               Fn::GetAtt:
                 - EC2SecurityGroup
                 - GroupId
+    GrafanaSecurityGroup:
+      Type: "AWS::EC2::SecurityGroup"
+      Properties:
+        GroupDescription: "grafana access"
     EC2SecurityGroup:
       Type: "AWS::EC2::SecurityGroup"
       Properties:
@@ -289,6 +314,13 @@ resources:
                     - "logs:CreateLogStream"
                     - "logs:PutLogEvents"
                   Resource: "*"
+                -
+                  Effect: "Allow"
+                  Action:
+                    - "s3:ListBucket"
+                    - "s3:GetObject"
+                  Resource:
+                    - Fn::Join: ['', ['arn:aws:s3:::', Ref: "MetricsBucket", "/*"]]
     ContainerLogs:
       Type: "AWS::Logs::LogGroup"
       Properties:

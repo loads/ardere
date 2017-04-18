@@ -90,6 +90,16 @@ class TestECSManager(unittest.TestCase):
         resp = ecs.has_metrics_node("t2.medium")
         eq_(resp, True)
 
+    def test_has_started_metric_creation(self):
+        ecs = self._make_FUT()
+        ecs._ecs_client.list_tasks.return_value = {"taskArns": [123]}
+        eq_(ecs.has_started_metric_creation(), True)
+
+    def test_has_finished_metric_creation(self):
+        ecs = self._make_FUT()
+        ecs._ecs_client.list_tasks.return_value = {"taskArns": [123]}
+        eq_(ecs.has_finished_metric_creation(), True)
+
     def test_request_instances(self):
         instances = {
             "t2.medium": 10
@@ -122,7 +132,7 @@ class TestECSManager(unittest.TestCase):
             "containerInstanceArns": []
         }
         result = ecs.locate_metrics_container_ip()
-        eq_(result, None)
+        eq_(result, (None, None))
 
     def test_locate_metrics_service(self):
         ecs = self._make_FUT()
@@ -158,11 +168,17 @@ class TestECSManager(unittest.TestCase):
         result = ecs.create_metrics_service(dict(instance_type="c4.large"))
         eq_(result["service_arn"], "arn:of:some:service::")
 
+    def test_run_metric_creation_task(self):
+        ecs = self._make_FUT()
+        ecs.run_metric_creation_task("arn:::", ("admin", "admin"),
+                                     "asdf", "atitle")
+        ecs._ecs_client.start_task.assert_called()
+
     def test_create_service(self):
         ecs = self._make_FUT()
 
         step = ecs._plan["steps"][0]
-        ecs._plan["influxdb_public_ip"] = "1.1.1.1"
+        ecs._plan["influxdb_private_ip"] = "1.1.1.1"
         step["docker_series"] = "default"
 
         # Setup mocks
