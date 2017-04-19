@@ -300,6 +300,7 @@ class TestAsyncPlanRunner(unittest.TestCase):
         mock_client.list_container_instances.return_value = {
             'containerInstanceArns': [
                 'Some-Arn-01234567890',
+                'Metric-Arn-01234567890',
             ],
             "nextToken": "token-8675309"
         }
@@ -325,10 +326,25 @@ class TestAsyncPlanRunner(unittest.TestCase):
                       self.runner.check_drained)
 
     def test_drain_check(self):
+        # Include a "metrics" instance to show that we ignore it.
+        self.plan["metrics_options"] = dict(enabled=True)
+        self.mock_ecs.locate_metrics_service.return_value = {
+            "deployments": [{
+                "desiredCount": 1,
+                "runningCount": 1
+            }],
+            "serviceArn": "Metric-Arn-01234567890"
+        }
+
         mock_client = mock.Mock()
         mock_client.list_container_instances.side_effect = [
-            {},
-            {}
+            {  # Actives
+                'containerInstanceArns': [
+                    'Metric-Arn-01234567890',
+                ],
+                "nextToken": "token-8675309"
+            },
+            {}  # Draining
         ]
         self.mock_boto.client.return_value = mock_client
         self.runner.check_drained()

@@ -1,5 +1,4 @@
 """AWS Helper Classes"""
-import json
 import logging
 import os
 import time
@@ -9,13 +8,7 @@ from collections import defaultdict
 import boto3
 import botocore
 from concurrent.futures import ThreadPoolExecutor
-from typing import (
-    Any,
-    Dict,
-    List,
-    Optional,
-    Tuple
-)  # noqa
+from typing import Any, Dict, List, Optional, Tuple  # noqa
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -314,7 +307,7 @@ class ECSManager(object):
     def locate_metrics_container_ip(self):
         # type: () -> Tuple[Optional[str], Optional[str]]
         """Locates the metrics container IP and container instance arn
-        
+
         Returns a tuple of (public_ip, container_arn)
 
         """
