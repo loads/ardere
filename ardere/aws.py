@@ -1,4 +1,5 @@
 """AWS Helper Classes"""
+import json
 import logging
 import os
 import time
@@ -8,7 +9,13 @@ from collections import defaultdict
 import boto3
 import botocore
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional  # noqa
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Tuple
+)  # noqa
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -20,6 +27,8 @@ wait_script_path = os.path.join(parent_dir_path, "src", "shell",
                                 "waitforcluster.sh")
 telegraf_script_path = os.path.join(parent_dir_path, "src", "shell",
                                     "telegraf.toml")
+metric_create_script = os.path.join(parent_dir_path, "ardere", "scripts",
+                                    "metric_creator.py")
 
 # EC2 userdata to setup values on load
 # Settings for net.ipv4 settings based on:
@@ -88,6 +97,7 @@ for vcpu, instance_types in ec2_type_by_vcpu.items():
 
 
 def cpu_units_for_instance_type(instance_type):
+    # type: (str) -> int
     """Calculate how many CPU units to allocate for an instance_type
 
     We calculate cpu_units as 1024 * vcpu's for each instance to allocate
@@ -115,9 +125,11 @@ class ECSManager(object):
     influxdb_container = "influxdb:1.2-alpine"
     telegraf_container = "telegraf:1.2-alpine"
     grafana_container = "grafana/grafana:4.1.2"
+    python_container = "jfloff/alpine-python:2.7-slim"
 
     _wait_script = None
     _telegraf_script = None
+    _metric_create_script = None
 
     def __init__(self, plan):
         # type: (Dict[str, Any]) -> None
@@ -152,6 +164,13 @@ class ECSManager(object):
         return self._telegraf_script
 
     @property
+    def metric_create_script(self):
+        if not self._metric_create_script:
+            with open(metric_create_script, 'r') as f:
+                self._metric_create_script = f.read()
+        return self._metric_create_script
+
+    @property
     def plan_uuid(self):
         return self._plan_uuid
 
@@ -161,6 +180,17 @@ class ECSManager(object):
             bucket=self.s3_ready_bucket,
             key="{}.ready".format(self._plan_uuid)
         )
+
+    @property
+    def log_config(self):
+        return {
+            "logDriver": "awslogs",
+            "options": {"awslogs-group": self.container_log_group,
+                        "awslogs-region": "us-east-1",
+                        "awslogs-stream-prefix":
+                            "ardere-{}".format(self.plan_uuid)
+                        }
+        }
 
     @property
     def influx_db_name(self):
@@ -175,11 +205,19 @@ class ECSManager(object):
         return self._plan["metrics_options"]["dashboard"]["admin_password"]
 
     def family_name(self, step):
+        # type: (Dict[str, Any]) -> str
         """Generate a consistent family name for a given step"""
         return step["name"] + "-" + self._plan_uuid
 
     def metrics_family_name(self):
+        # type: () -> str
+        """Generate a consistent metrics family name"""
         return "{}-metrics".format(self._ecs_name)
+
+    def metrics_setup_family_name(self):
+        # type: () -> str
+        """Generate a consistent metric setup family name"""
+        return "{}-metrics-setup".format(self._ecs_name)
 
     def query_active_instances(self, additional_tags=None):
         # type: (Optional[Dict[str, str]]) -> Dict[str, int]
@@ -225,6 +263,25 @@ class ECSManager(object):
         )
         return instance_type in instances
 
+    def has_started_metric_creation(self):
+        # type: () -> bool
+        """Return whether the metric creation container was started"""
+        response = self._ecs_client.list_tasks(
+            cluster=self._ecs_name,
+            startedBy=self.plan_uuid
+        )
+        return bool(response["taskArns"])
+
+    def has_finished_metric_creation(self):
+        # type: () -> bool
+        """Return whether the metric creation container has finished"""
+        response = self._ecs_client.list_tasks(
+            cluster=self._ecs_name,
+            startedBy=self.plan_uuid,
+            desiredStatus="STOPPED"
+        )
+        return bool(response["taskArns"])
+
     def request_instances(self, instances, security_group_ids,
                           additional_tags=None):
         # type: (Dict[str, int], List[str], Optional[Dict[str, str]]) -> None
@@ -255,13 +312,18 @@ class ECSManager(object):
             )
 
     def locate_metrics_container_ip(self):
-        """Locates the metrics container IP"""
+        # type: () -> Tuple[Optional[str], Optional[str]]
+        """Locates the metrics container IP and container instance arn
+        
+        Returns a tuple of (public_ip, container_arn)
+
+        """
         response = self._ecs_client.list_container_instances(
             cluster=self._ecs_name,
             filter="task:group == service:metrics"
         )
         if not response["containerInstanceArns"]:
-            return None
+            return None, None
 
         container_arn = response["containerInstanceArns"][0]
         response = self._ecs_client.describe_container_instances(
@@ -269,11 +331,13 @@ class ECSManager(object):
             containerInstances=[container_arn]
         )
 
-        ec2_instance_id = response["containerInstances"][0]["ec2InstanceId"]
+        container_instance = response["containerInstances"][0]
+        ec2_instance_id = container_instance["ec2InstanceId"]
         instance = self.boto.resource("ec2").Instance(ec2_instance_id)
-        return instance.public_ip_address
+        return instance.private_ip_address, container_arn
 
     def locate_metrics_service(self):
+        # type: () -> Optional[str]
         """Locate and return the metrics service arn if any"""
         response = self._ecs_client.describe_services(
             cluster=self._ecs_name,
@@ -309,6 +373,30 @@ class ECSManager(object):
                 "http://admin:admin@localhost:3000/api/datasources"
         }
 
+        # Setup the task definition for setting up influxdb/grafana instances
+        # per run
+        mc_cmd = """\
+        pip install influxdb requests boto3 && \
+        echo "${__ARDERE_PYTHON_SCRIPT__}" > setup_db.py && \
+        python setup_db.py
+        """
+        mc_cmd = ['sh', '-c', '{}'.format(mc_cmd)]
+        self._ecs_client.register_task_definition(
+            family=self.metrics_setup_family_name(),
+            containerDefinitions=[
+                {
+                    "name": "metricsetup",
+                    "image": self.python_container,
+                    "cpu": 128,
+                    "entryPoint": mc_cmd,
+                    "memoryReservation": 256,
+                    "privileged": True,
+                    "logConfiguration": self.log_config
+                }
+            ],
+            networkMode="host"
+        )
+
         task_response = self._ecs_client.register_task_definition(
             family=self.metrics_family_name(),
             containerDefinitions=[
@@ -323,20 +411,12 @@ class ECSManager(object):
                         {"containerPort": 8086},
                         {"containerPort": 8088}
                     ],
-                    "logConfiguration": {
-                        "logDriver": "awslogs",
-                        "options": {
-                            "awslogs-group": self.container_log_group,
-                            "awslogs-region": "us-east-1",
-                            "awslogs-stream-prefix":
-                                "ardere-{}".format(self.plan_uuid)
-                        }
-                    }
+                    "logConfiguration": self.log_config
                 },
                 {
                     "name": "grafana",
                     "image": self.grafana_container,
-                    "cpu": 512,
+                    "cpu": 256,
                     "memoryReservation": 256,
                     "entryPoint": cmd,
                     "portMappings": [
@@ -347,15 +427,7 @@ class ECSManager(object):
                         {"name": key, "value": value} for key, value in
                         gf_env.items()
                     ],
-                    "logConfiguration": {
-                        "logDriver": "awslogs",
-                        "options": {
-                            "awslogs-group": self.container_log_group,
-                            "awslogs-region": "us-east-1",
-                            "awslogs-stream-prefix":
-                                "ardere-{}".format(self.plan_uuid)
-                        }
-                    }
+                    "logConfiguration": self.log_config
                 }
             ],
             # use host network mode for optimal performance
@@ -388,6 +460,40 @@ class ECSManager(object):
         )
         service_arn = service_result["service"]["serviceArn"]
         return dict(task_arn=task_arn, service_arn=service_arn)
+
+    def run_metric_creation_task(self, container_instance, grafana_auth,
+                                 dashboard=None,
+                                 dashboard_name=None):
+        # type: (str, Tuple[str, str], Optional[str], Optional[str]) -> None
+        """Starts the metric creation task"""
+        env = {
+            "__ARDERE_GRAFANA_USER__": grafana_auth[0],
+            "__ARDERE_GRAFANA_PASS__": grafana_auth[1],
+            "__ARDERE_PYTHON_SCRIPT__": self.metric_create_script,
+            "__ARDERE_INFLUXDB_NAME__": self.influx_db_name
+        }
+
+        if dashboard:
+            env["__ARDERE_DASHBOARD__"] = dashboard
+            env["__ARDERE_DASHBOARD_NAME__"] = dashboard_name
+
+        self._ecs_client.start_task(
+            cluster=self._ecs_name,
+            taskDefinition=self.metrics_setup_family_name(),
+            overrides={
+                'containerOverrides': [
+                    {
+                        "name": "metricsetup",
+                        "environment": [
+                            {"name": key, "value": value} for key, value in
+                            env.items()
+                        ]
+                    }
+                ]
+            },
+            containerInstances=[container_instance],
+            startedBy=self.plan_uuid
+        )
 
     def create_service(self, step):
         # type: (Dict[str, Any]) -> Dict[str, Any]
@@ -432,16 +538,7 @@ class ECSManager(object):
             "ulimits": [
                 dict(name="nofile", softLimit=1000000, hardLimit=1000000)
             ],
-            "logConfiguration": {
-                "logDriver": "awslogs",
-                "options": {
-                    "awslogs-group": self.container_log_group,
-                    "awslogs-region": "us-east-1",
-                    "awslogs-stream-prefix": "ardere-{}".format(
-                        self.plan_uuid
-                    )
-                }
-            }
+            "logConfiguration": self.log_config
         }
         if "port_mapping" in step:
             ports = [{"containerPort": port} for port in step["port_mapping"]]
@@ -470,22 +567,13 @@ class ECSManager(object):
                 {"name": "__ARDERE_TELEGRAF_STEP__",
                  "value": step["name"]},
                 {"name": "__ARDERE_INFLUX_ADDR__",
-                 "value": "{}:8086".format(self._plan["influxdb_public_ip"])},
+                 "value": "{}:8086".format(self._plan["influxdb_private_ip"])},
                 {"name": "__ARDERE_INFLUX_DB__",
                  "value": self.influx_db_name},
                 {"name": "__ARDERE_TELEGRAF_TYPE__",
                  "value": step["docker_series"]}
             ],
-            "logConfiguration": {
-                "logDriver": "awslogs",
-                "options": {
-                    "awslogs-group": self.container_log_group,
-                    "awslogs-region": "us-east-1",
-                    "awslogs-stream-prefix": "ardere-{}".format(
-                        self.plan_uuid
-                    )
-                }
-            }
+            "logConfiguration": self.log_config
         }
 
         task_response = self._ecs_client.register_task_definition(
@@ -582,6 +670,7 @@ class ECSManager(object):
             self.stop_finished_service(start_time, step)
 
     def shutdown_plan(self, steps):
+        # type: (List[Dict[str, Any]]) -> None
         """Terminate the entire plan, ensure all services and task
         definitions are completely cleaned up and removed"""
         # Locate all the services for the ECS Cluster
@@ -627,6 +716,7 @@ class ECSManager(object):
         # Add in the metrics family name if we need to tear_down
         if self._plan["metrics_options"]["tear_down"]:
             step_family_names.append(self.metrics_family_name())
+            step_family_names.append(self.metrics_setup_family_name())
 
         for family_name in step_family_names:
             try:
