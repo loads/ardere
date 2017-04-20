@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import re
@@ -7,7 +6,6 @@ from collections import defaultdict
 
 import boto3
 import botocore
-import requests
 import toml
 from marshmallow import (
     Schema,
@@ -279,7 +277,8 @@ class AsynchronousPlanRunner(object):
             raise CreatingMetricSourceException("Started metric creation")
 
         if not self.ecs.has_finished_metric_creation():
-            raise CreatingMetricSourceException("Metric creation still running")
+            raise CreatingMetricSourceException("Metric creation still "
+                                                "running")
 
         metric_ip = self.event["influxdb_private_ip"]
         self.event["grafana_dashboard"] = "http://{}:3000".format(metric_ip)
@@ -368,15 +367,23 @@ class AsynchronousPlanRunner(object):
 
         """
         client = self.boto.client('ecs')
-        actives = len(
-            client.list_container_instances(
-                cluster=self.event["ecs_name"],
-                maxResults=1,
-                status="ACTIVE",
-            ).get('containerInstanceArns', []))
-        if actives:
+        actives = client.list_container_instances(
+            cluster=self.event["ecs_name"],
+            maxResults=1,
+            status="ACTIVE",
+        ).get('containerInstanceArns', [])
+        # filter out metric servers
+        if self.event["metrics_options"]["enabled"]:
+            metrics = self.ecs.locate_metrics_service()
+            if metrics:
+                metrics_arn = metrics.get("serviceArn")
+                try:
+                    actives.remove(metrics_arn)
+                except ValueError:
+                    pass
+        if len(actives):
             raise UndrainedInstancesException(
-                "Still {} active.".format(actives))
+                "Still active: {}.".format(actives))
         draining = len(
             client.list_container_instances(
                 cluster=self.event["ecs_name"],
@@ -385,5 +392,5 @@ class AsynchronousPlanRunner(object):
             ).get('containerInstanceArns', []))
         if draining:
             raise UndrainedInstancesException(
-                "Still {} draining.".format(draining))
+                "Still draining: {}.".format(draining))
         return self.event
