@@ -345,9 +345,7 @@ class AsynchronousPlanRunner(object):
         return self.event
 
     def cleanup_cluster(self):
-        """Shutdown all ECS services and deregister all task definitions
-
-        """
+        """Shutdown all ECS services and deregister all task definitions"""
         self.ecs.shutdown_plan(self.event["steps"])
 
         # Attempt to remove the S3 object
@@ -363,34 +361,8 @@ class AsynchronousPlanRunner(object):
         return self.event
 
     def check_drained(self):
-        """Ensure that all services are shut down before allowing restart
-
-        """
-        client = self.boto.client('ecs')
-        actives = client.list_container_instances(
-            cluster=self.event["ecs_name"],
-            maxResults=1,
-            status="ACTIVE",
-        ).get('containerInstanceArns', [])
-        # filter out metric servers
-        if self.event["metrics_options"]["enabled"]:
-            metrics = self.ecs.locate_metrics_service()
-            if metrics:
-                metrics_arn = metrics.get("serviceArn")
-                try:
-                    actives.remove(metrics_arn)
-                except ValueError:
-                    pass
-        if len(actives):
-            raise UndrainedInstancesException(
-                "Still active: {}.".format(actives))
-        draining = len(
-            client.list_container_instances(
-                cluster=self.event["ecs_name"],
-                maxResults=1,
-                status="DRAINING",
-            ).get('containerInstanceArns', []))
-        if draining:
-            raise UndrainedInstancesException(
-                "Still draining: {}.".format(draining))
-        return self.event
+        """Ensure that all services are shut down before allowing restart"""
+        if self.ecs.all_services_done(self.event["steps"]):
+            return self.event
+        else:
+            raise UndrainedInstancesException("Services still draining")

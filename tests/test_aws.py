@@ -244,6 +244,38 @@ class TestECSManager(unittest.TestCase):
         ecs.all_services_ready(ecs._plan["steps"])
         ecs.service_ready.assert_called()
 
+    def test_service_done_true(self):
+        ecs = self._make_FUT()
+        step = ecs._plan["steps"][0]
+
+        ecs._ecs_client.describe_services.return_value = {
+            "services": [{
+                "status": "INACTIVE"
+            }]
+        }
+
+        result = ecs.service_done(step)
+        eq_(result, True)
+
+    def test_service_not_known(self):
+        ecs = self._make_FUT()
+        step = ecs._plan["steps"][0]
+
+        ecs._ecs_client.describe_services.return_value = {
+            "services": [{
+                "status": "DRAINING"
+            }]
+        }
+
+        result = ecs.service_done(step)
+        eq_(result, False)
+
+    def test_all_services_done(self):
+        ecs = self._make_FUT()
+        ecs.service_done = mock.Mock()
+        ecs.all_services_done(ecs._plan["steps"])
+        ecs.service_done.assert_called()
+
     def test_stop_finished_service_stopped(self):
         ecs = self._make_FUT()
         ecs._ecs_client.update_service = mock.Mock()
