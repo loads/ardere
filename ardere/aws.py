@@ -636,6 +636,27 @@ class ECSManager(object):
             results = executer.map(self.service_ready, steps)
         return all(results)
 
+    def service_done(self, step):
+        # type: (Dict[str, Any]) -> bool
+        """Query a service to return whether its fully drained and back to
+        INACTIVE"""
+        service_name = step["name"]
+        response = self._ecs_client.describe_services(
+            cluster=self._ecs_name,
+            services=[service_name]
+        )
+
+        service = response["services"][0]
+        return service["status"] == "INACTIVE"
+
+    def all_services_done(self, steps):
+        # type: (List[Dict[str, Any]]) -> bool
+        """Queries all service ARN's in the plan to see if they're fully
+        DRAINED and now INACTIVE"""
+        with ThreadPoolExecutor(max_workers=8) as executer:
+            results = executer.map(self.service_done, steps)
+        return all(results)
+
     def stop_finished_service(self, start_time, step):
         # type: (start_time, Dict[str, Any]) -> None
         """Stops a service if it needs to shutdown"""
