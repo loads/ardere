@@ -184,7 +184,7 @@ stepFunctions:
               ErrorEquals:
                 - ServicesStartingException
               IntervalSeconds: 10
-              MaxAttempts: 60
+              MaxAttempts: 180
               BackoffRate: 1
           Catch:
             -
@@ -206,7 +206,7 @@ stepFunctions:
         "Check for Cluster Done":
           Type: Task
           Resource: check_for_cluster_done
-          Next: "Wait for new Cluster Check"
+          Next: "Wait for Cluster Done"
           Retry:
             -
               ErrorEquals:
@@ -220,7 +220,7 @@ stepFunctions:
                 - States.ALL
               ResultPath: "$.error-info"
               Next: "Clean-up Cluster"
-        "Wait for new Cluster Check":
+        "Wait for Cluster Done":
           Type: Wait
           Seconds: 10
           Next: "Check for Cluster Done"
