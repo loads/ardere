@@ -110,6 +110,7 @@ functions:
     timeout: 300
   create_ecs_services:
     handler: handler.create_ecs_services
+    timeout: 300
   wait_for_cluster_ready:
     handler: handler.wait_for_cluster_ready
   signal_cluster_start:
