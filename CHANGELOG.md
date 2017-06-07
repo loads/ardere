@@ -1,3 +1,17 @@
+<a name="0.1.1"></a>
+## 0.1.1 (2017-05-15)
+
+
+#### Doc
+
+*   update README with run steps ([3d6b5aa2](https://github.com/loads/ardere/commit/3d6b5aa2e6277a33e1a464d30168bbc2f406c512))
+
+#### Bug Fixes
+
+*   bump wait for cluster ready from 10 to 30 minutes ([a23115b8](https://github.com/loads/ardere/commit/a23115b8bc20f4e7b44ef4bf78b3687069ea1253))
+
+
+
 <a name="0.1"></a>
 ## 0.1 (2017-04-25)
 
