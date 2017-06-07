@@ -611,8 +611,8 @@ class ECSManager(object):
     def create_services(self, steps):
         # type: (List[Dict[str, Any]]) -> None
         """Create ECS Services given a list of steps"""
-        with ThreadPoolExecutor(max_workers=8) as executer:
-            executer.map(self.create_service, steps)
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(self.create_service, steps))
 
     def service_ready(self, step):
         # type: (Dict[str, Any]) -> bool
@@ -632,8 +632,8 @@ class ECSManager(object):
     def all_services_ready(self, steps):
         # type: (List[Dict[str, Any]]) -> bool
         """Queries all service ARN's in the plan to see if they're ready"""
-        with ThreadPoolExecutor(max_workers=8) as executer:
-            results = executer.map(self.service_ready, steps)
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = executor.map(self.service_ready, steps)
         return all(results)
 
     def service_done(self, step):
@@ -653,8 +653,8 @@ class ECSManager(object):
         # type: (List[Dict[str, Any]]) -> bool
         """Queries all service ARN's in the plan to see if they're fully
         DRAINED and now INACTIVE"""
-        with ThreadPoolExecutor(max_workers=8) as executer:
-            results = executer.map(self.service_done, steps)
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = executor.map(self.service_done, steps)
         return all(results)
 
     def stop_finished_service(self, start_time, step):
