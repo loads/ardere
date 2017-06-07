@@ -4,7 +4,7 @@ import time
 import unittest
 
 import mock
-from nose.tools import eq_, ok_
+from nose.tools import assert_raises, eq_, ok_
 
 from tests import fixtures
 
@@ -209,6 +209,20 @@ class TestECSManager(unittest.TestCase):
         ecs.create_service = mock.Mock()
         ecs.create_services(ecs._plan["steps"])
         ecs.create_service.assert_called()
+
+    def test_create_services_ecs_error(self):
+        from botocore.exceptions import ClientError
+        ecs = self._make_FUT()
+
+        step = ecs._plan["steps"][0]
+        ecs._plan["influxdb_private_ip"] = "1.1.1.1"
+        step["docker_series"] = "default"
+        ecs._ecs_client.register_task_definition.side_effect = ClientError(
+            {"Error": {}}, "some_op"
+        )
+
+        with assert_raises(ClientError):
+            ecs.create_services(ecs._plan["steps"])
 
     def test_service_ready_true(self):
         ecs = self._make_FUT()
