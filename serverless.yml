@@ -21,6 +21,7 @@ provider:
   name: aws
   runtime: python2.7
   memorySize: 128
+  timeout: 60
   environment:
     ecs_profile:
       Fn::GetAtt:
@@ -119,6 +120,7 @@ functions:
     handler: handler.check_for_cluster_done
   cleanup_cluster:
     handler: handler.cleanup_cluster
+    timeout: 300
   check_drain:
     handler: handler.check_drain
 
