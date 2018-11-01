@@ -45,7 +45,7 @@ Create a Python virtualenv, and install the test requirements:
 The tests can now be run with nose:
 
     $ nosetests
-   
+  
 Note that **you cannot run the sls deploy while the virtualenv is active**
 due to how the serverless Python requirements plugin operates.
 
@@ -58,9 +58,16 @@ due to how the serverless Python requirements plugin operates.
    (mozilla-services use: "ardere-dev-ardere")
 4. Click on "New Execution" button
 5. Paste your json config into text area
-   (example: https://github.com/mozilla-services/screenshots-loadtests/blob/master/ardere.json)
+   (example: [**mozilla-services/screenshots-loadtests** /ardere.json](https://github.com/mozilla-services/screenshots-loadtests/blob/master/ardere.json))
 6. Optional: Assign a name to your execution
 7. Click on "Start Execution"
 8. Monitor execution in Dashboard
 9. Test load should be visible in DataDog, NewRelic, etc.
 
+## Monitoring
+
+### Metrics Node Monitoring (Grafana) 
+
+1. ssh -L 3000:\<ip\_metrics\_node\>:3000  \<ip\_bastion\_host\>
+2. open local browser to http://localhost:3000
+3. login using credentials specified in your ardere (JSON) config file
